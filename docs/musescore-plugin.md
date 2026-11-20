@@ -217,7 +217,13 @@ and quarter-tone notes across the supported MuseScore matrix.
 
 ## Protocol
 
-The plugin accepts JSON messages over WebSocket. Each message must have a `command` field and optionally a `params` field. Responses have either a `result` field (on success) or an `error` field (on failure).
+The plugin accepts JSON objects over WebSocket. Each message must have a
+nonempty string `command` naming a supported command. Optional `params` must be
+an object; omitting it supplies an empty object. Explicit `null`, arrays, and
+primitive values are rejected as envelopes or parameters. Malformed JSON,
+invalid envelopes, and unknown commands receive an `error` response without
+executing a command; the same socket remains usable. Responses have either a
+`result` field (on success) or an `error` field (on failure).
 
 ### Capability negotiation
 
