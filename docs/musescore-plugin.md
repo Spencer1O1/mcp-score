@@ -31,6 +31,21 @@ Then:
 
 The plugin opens a small status window and starts a WebSocket server on port 8765. **Keep the window open** -- closing it stops the plugin and the server with it (MuseScore 4 has no persistent dock plugins). Then connect from your MCP client with `connect_to_musescore`; the manipulation and analysis tools return a "not connected" error until you do.
 
+### Updating the server and plugin together
+
+The Python server negotiates a protocol version and supported commands before
+accepting a MuseScore connection. Legacy plugins without this handshake and
+plugins using an incompatible protocol are rejected with upgrade instructions.
+Install the plugin from the same Python environment as the server, then close
+and reopen its window. Updating Python alone does not update an already running
+plugin.
+
+When MuseScore runs on Windows and the MCP client runs on another host, install
+the plugin on the Windows machine and configure the client to launch the matching
+Python server environment. The server connects to the MuseScore host using the
+`host` and `port` arguments to `connect_to_musescore`. This negotiation does not
+provide authentication or network access control.
+
 ## Verifying the connection
 
 The plugin window shows `Bridge running on ws://localhost:8765` when the server is up. MuseScore's log file also records:
@@ -57,6 +72,40 @@ echo '{"command": "ping"}' | websocat ws://localhost:8765
 ## Protocol
 
 The plugin accepts JSON messages over WebSocket. Each message must have a `command` field and optionally a `params` field. Responses have either a `result` field (on success) or an `error` field (on failure).
+
+### Capability negotiation
+
+The Python bridge sends `getCapabilities` with `{"protocolVersion": 1}` when
+opening a connection, including after reconnecting. The plugin returns:
+
+```json
+{
+  "result": {
+    "protocolVersion": 1,
+    "pluginVersion": "0.2.0",
+    "commands": ["getCapabilities", "ping"],
+    "sequenceCommands": ["ping"]
+  }
+}
+```
+
+The command lists above are abbreviated. The plugin derives the actual lists
+from its command and sequence dispatch tables. The protocol revision describes
+the wire contract independently of the package version. A mismatched revision
+or malformed capability response causes the Python bridge to close the connection.
+The handshake requires no open score.
+
+Before each request, the bridge checks that the negotiated plugin supports the
+command, including each step of `processSequence`. Reconnecting renegotiates and
+rechecks support before retrying a request. Unsupported operations are rejected
+without sending them to the plugin.
+
+`connect_to_musescore` returns the negotiated plugin protocol, plugin version,
+server package version, and supported commands. `get_musescore_bridge_info`
+returns those diagnostics for the active MuseScore connection without reading
+or modifying the score. Command presence describes available protocol operations;
+it does not imply complete notation coverage, precise event addressing, or
+verified mutation results.
 
 ### Request format
 
@@ -87,11 +136,12 @@ The plugin accepts JSON messages over WebSocket. Each message must have a `comma
 
 ### Score information
 
-| Command         | Params | Description                                                       |
-| --------------- | ------ | ----------------------------------------------------------------- |
-| `ping`          | none   | Health check. Returns `"pong"`.                                   |
-| `getScore`      | none   | Score metadata: title, parts, measure count, key/time signatures. |
-| `getCursorInfo` | none   | Current cursor position: measure, staff, beat, element info.      |
+| Command           | Params                   | Description                                                                                     |
+| ----------------- | ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `ping`            | none                     | Health check. Returns `"pong"`.                                                                 |
+| `getCapabilities` | `{protocolVersion: int}` | Negotiate the protocol and report plugin version and supported top-level and sequence commands. |
+| `getScore`        | none                     | Score metadata: title, parts, measure count, key/time signatures.                               |
+| `getCursorInfo`   | none                     | Current cursor position: measure, staff, beat, element info.                                    |
 
 ### Navigation
 
@@ -192,6 +242,17 @@ Any other text is accepted as the marking's text; only the ones listed also set 
 - Ensure the plugin window is open and shows `Bridge running`
 - Verify no other application is using port 8765: `lsof -i :8765` (macOS/Linux) or `netstat -ano | findstr 8765` (Windows)
 - Check MuseScore's log file for `[mcp-score]` error messages
+
+### Capability negotiation fails
+
+- An `Unknown command: getCapabilities` response identifies a legacy plugin.
+  Run `mcp-score install-plugin` from the server's Python environment on the
+  MuseScore host, then close and reopen the plugin window.
+- An incompatible protocol response means the Python server and loaded plugin
+  do not share a wire contract. Install a matching pair before reconnecting.
+- An unsupported command error means the connected plugin did not advertise
+  that operation. Check `get_musescore_bridge_info` and install a matching plugin
+  rather than retrying the same edit against the same connection.
 
 ### "No score is currently open" errors
 

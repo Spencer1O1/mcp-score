@@ -105,6 +105,26 @@ class TestMuseScoreBridgeReadsFixture:
                 await bridge.go_to_measure(count + 1)
 
 
+class TestMuseScoreBridgeCapabilities:
+    @pytest.mark.anyio()
+    async def test_negotiated_commands_match_live_plugin_dispatch(self) -> None:
+        async with _connected_bridge() as bridge:
+            diagnostics = bridge.diagnostics()
+            assert diagnostics.plugin_version
+            assert diagnostics.protocol_version == 1
+            assert "getScore" in diagnostics.commands
+            assert "appendMeasures" in diagnostics.sequence_commands
+            assert "getScore" not in diagnostics.sequence_commands
+            assert await bridge.ping()
+
+    @pytest.mark.anyio()
+    async def test_plugin_rejects_incompatible_client_protocol(self) -> None:
+        async with _connected_bridge() as bridge:
+            with pytest.raises(BridgeError, match="Unsupported bridge protocol"):
+                await bridge.send_command("getCapabilities", {"protocolVersion": 2})
+            assert await bridge.ping()
+
+
 class TestMuseScoreBridgeModifiesScore:
     @pytest.mark.anyio()
     async def test_append_measures_then_undo_restores_count(self) -> None:

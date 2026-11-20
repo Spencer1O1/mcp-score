@@ -65,7 +65,13 @@ from mcp_score.tools.manipulation import (
     transpose_passage,
     undo_last_action,
 )
-from tests.fakes import WEBSOCKETS_CONNECT, BridgeCall, FakeBridge, fake_connection
+from tests.fakes import (
+    MUSESCORE_HANDSHAKE,
+    WEBSOCKETS_CONNECT,
+    BridgeCall,
+    FakeBridge,
+    fake_connection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -232,7 +238,7 @@ class TestConnectToMusescore:
         self, registry: BridgeRegistry, context: ScoreContext
     ) -> None:
         # Arrange
-        connect = AsyncMock(return_value=fake_connection())
+        connect = AsyncMock(return_value=fake_connection(MUSESCORE_HANDSHAKE))
 
         with patch(WEBSOCKETS_CONNECT, connect):
             # Act
@@ -268,7 +274,7 @@ class TestConnectToMusescore:
         self, registry: BridgeRegistry, context: ScoreContext
     ) -> None:
         # Arrange
-        connection = fake_connection()
+        connection = fake_connection(MUSESCORE_HANDSHAKE)
         with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
             await connect_to_musescore(context)
 

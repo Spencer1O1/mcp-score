@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mcp_score.bridge.capabilities import MuseScoreDiagnostics
 from mcp_score.bridge.dorico import DEFAULT_PORT as DORICO_DEFAULT_PORT
 from mcp_score.bridge.musescore import DEFAULT_PORT as MUSESCORE_DEFAULT_PORT
 from mcp_score.bridge.results import Result, ScoreInfo
@@ -35,6 +36,10 @@ class Connected(Result):
     uri: str
 
 
+class MuseScoreConnected(Connected):
+    bridge: MuseScoreDiagnostics
+
+
 class Disconnected(Result):
     application: str
 
@@ -53,7 +58,8 @@ async def _connect(
     bridge.port = port
     if not await registry_of(context).activate(bridge):
         raise ToolError(
-            f"Could not connect to {bridge.application_name} at {bridge.uri}. {hint}"
+            f"Could not connect to {bridge.application_name} at {bridge.uri}. "
+            f"{bridge.connection_error or ''} {hint}"
         )
     return Connected(application=bridge.application_name, uri=bridge.uri)
 
@@ -66,19 +72,37 @@ async def _disconnect(context: ScoreContext, bridge: ScoreBridge) -> Disconnecte
 @score_tool
 async def connect_to_musescore(
     context: ScoreContext, host: str = DEFAULT_HOST, port: int = MUSESCORE_DEFAULT_PORT
-) -> Connected:
+) -> MuseScoreConnected:
     """Connect to a running MuseScore Studio (4.4.2 or later).
 
     The MCP Score Bridge plugin must be running in MuseScore with its
     window open. Connecting disconnects any other application.
+    Negotiates the plugin protocol and returns supported commands and versions.
+    Incompatible or legacy plugins must be reinstalled before connecting.
 
     Args:
         host: WebSocket host (default: localhost).
         port: WebSocket port (default: 8765).
     """
-    return await _connect(
+    connected = await _connect(
         context, registry_of(context).musescore, host, port, MUSESCORE_CONNECT_HINT
     )
+    return MuseScoreConnected(
+        **connected.model_dump(), bridge=registry_of(context).musescore.diagnostics()
+    )
+
+
+@score_tool
+async def get_musescore_bridge_info(context: ScoreContext) -> MuseScoreDiagnostics:
+    """Get negotiated protocol, plugin/server versions and supported commands.
+
+    Requires an active MuseScore connection. Does not read or modify the score.
+    Command availability describes protocol operations, not notation coverage.
+    """
+    bridge = require_bridge(context)
+    if bridge is not registry_of(context).musescore:
+        raise ToolError("Bridge capability diagnostics require MuseScore.")
+    return registry_of(context).musescore.diagnostics()
 
 
 @score_tool
@@ -140,6 +164,7 @@ def register(server: MCPServer) -> None:
         connect_to_dorico,
         disconnect_from_dorico,
         get_live_score_info,
+        get_musescore_bridge_info,
         ping_score_app,
     ):
         server.tool()(tool)

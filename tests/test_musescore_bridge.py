@@ -38,7 +38,12 @@ from mcp_score.bridge.results import (
     TimeSignatureSet,
     Transposed,
 )
-from tests.fakes import WEBSOCKETS_CONNECT, fake_connection, sent_payloads
+from tests.fakes import (
+    MUSESCORE_HANDSHAKE,
+    WEBSOCKETS_CONNECT,
+    fake_connection,
+    sent_payloads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -81,10 +86,11 @@ CURSOR = CursorInfo(
 
 async def _connected_bridge(*replies: Any) -> tuple[MuseScoreBridge, AsyncMock]:
     """A bridge connected to a mock plugin that answers with *replies*."""
-    connection = fake_connection(*replies)
+    connection = fake_connection(MUSESCORE_HANDSHAKE, *replies)
     bridge = MuseScoreBridge()
     with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
         await bridge.connect()
+    connection.send.reset_mock()
     return bridge, connection
 
 
