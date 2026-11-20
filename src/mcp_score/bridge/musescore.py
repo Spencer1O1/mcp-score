@@ -27,6 +27,7 @@ from mcp_score.bridge.duration_edit import (
     DurationPolicy,
     ExpectedDurationEvent,
 )
+from mcp_score.bridge.note_rest import FillRestRequest, NoteRestEdit, ReplaceNoteRequest
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
 from mcp_score.bridge.pitch_batch import PitchBatchEdit, PitchBatchRequest
@@ -93,6 +94,8 @@ class MuseScoreCommand(StrEnum):
     SET_NOTE_PITCHES = "setNotePitches"
     SET_EVENT_DURATION = "setEventDuration"
     EXTEND_EVENT_DURATION = "extendEventDuration"
+    FILL_REST_WITH_NOTE = "fillRestWithNote"
+    REPLACE_NOTE_WITH_REST = "replaceNoteWithRest"
     ADD_REHEARSAL_MARK = "addRehearsalMark"
     ADD_CHORD_SYMBOL = "addChordSymbol"
     ADD_DYNAMIC = "addDynamic"
@@ -455,6 +458,20 @@ class MuseScoreBridge(WebSocketBridge):
         )
 
     # ── Writing ─────────────────────────────────────────────────────
+
+    async def fill_rest_with_note(self, request: FillRestRequest) -> NoteRestEdit:
+        return await self._run(
+            NoteRestEdit,
+            MuseScoreCommand.FILL_REST_WITH_NOTE,
+            _camel_case_keys(request.model_dump()),
+        )
+
+    async def replace_note_with_rest(self, request: ReplaceNoteRequest) -> NoteRestEdit:
+        return await self._run(
+            NoteRestEdit,
+            MuseScoreCommand.REPLACE_NOTE_WITH_REST,
+            _camel_case_keys(request.model_dump()),
+        )
 
     async def set_event_duration(
         self,

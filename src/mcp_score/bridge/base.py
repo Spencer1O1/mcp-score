@@ -23,6 +23,11 @@ if TYPE_CHECKING:
         DurationPolicy,
         ExpectedDurationEvent,
     )
+    from mcp_score.bridge.note_rest import (
+        FillRestRequest,
+        NoteRestEdit,
+        ReplaceNoteRequest,
+    )
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
     from mcp_score.bridge.pitch_batch import PitchBatchEdit, PitchBatchRequest
@@ -203,6 +208,16 @@ class ScoreBridge(ABC):
         """Select a range of measures (1-indexed) and staves (0-indexed), inclusive."""
 
     # ── Writing ─────────────────────────────────────────────────────
+
+    async def fill_rest_with_note(self, request: FillRestRequest) -> NoteRestEdit:
+        """Replace guarded rest coverage with one concert-pitched note."""
+        raise BridgeError(f"{self.application_name} cannot perform guarded rest fills.")
+
+    async def replace_note_with_rest(self, request: ReplaceNoteRequest) -> NoteRestEdit:
+        """Replace a guarded single-tone chord without shifting time."""
+        raise BridgeError(
+            f"{self.application_name} cannot perform guarded note removal."
+        )
 
     async def set_event_duration(
         self,
