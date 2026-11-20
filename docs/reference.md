@@ -834,9 +834,11 @@ retry this mutation after an uncertain response.
 
 ### `replace_live_note_with_rest`
 
-Replace an ordinary single-tone chord with an equal-duration plain rest.
+Replace an ordinary single-tone chord with equal-duration plain rest coverage.
 
-Supply ALL fresh target staff/voice measure events as expected. Atomic native
+Native rhythmic decomposition may split rests; their exact interval union
+must equal the original chord span. Supply ALL fresh target staff/voice
+measure events as expected. Atomic native
 validation and actual all-track read-back prevent partial or stale replacement.
 Only undotted whole through 32nd, ordinary unbeamed single-tone chords without
 lyrics, articulations, other attachments, ties, tuplets, grace notes,

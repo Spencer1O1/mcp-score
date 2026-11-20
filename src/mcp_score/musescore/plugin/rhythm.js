@@ -64,8 +64,16 @@ function adjacent(plugin,params) {
         return measure.measure!==params.measure;
     }).map(Duration.measureKey)]);
 }
+function spannerListAvailable(plugin) {
+    var spans=plugin.curScore.spanners;
+    return spans && Pitch.integer(spans.length) && spans.length>=0;
+}
+function spanners(plugin,onset,end) {
+    if (!spannerListAvailable(plugin)) throw new Error("Unknown native spanner list metadata");
+    return Duration.spanners(plugin,onset,end);
+}
 function state(plugin,params) {
-    return [staffContext(plugin,params),adjacent(plugin,params),Duration.spanners(plugin)];
+    return [staffContext(plugin,params),adjacent(plugin,params),spanners(plugin)];
 }
 function stateKey(value) {return JSON.stringify(value);}
 function staffFacts(plugin,resolved,params) {
@@ -78,7 +86,8 @@ function staffFacts(plugin,resolved,params) {
     var nativeTime=resolved.segment.fraction;
     if (Duration.ticks(nativeTime)!==resolved.tick) throw new Error("Exact native segment fraction unavailable");
     var stretch=staff.timeStretch(nativeTime);
-    if (!stretch || stretch.numerator!==stretch.denominator || stretch.denominator<=0) {
+    if (!stretch || !Pitch.integer(stretch.numerator) || !Pitch.integer(stretch.denominator)
+            || stretch.numerator<=0 || stretch.denominator<=0 || stretch.numerator!==stretch.denominator) {
         throw new Error("Nonunit or unknown native time stretch");
     }
     var interval=staff.transpose(nativeTime);
@@ -109,6 +118,17 @@ function intervalClear(plugin,resolved,length) {
     var end=resolved.tick+length;
     for (var segment=resolved.measure.firstSegment; segment; segment=segment.nextInMeasure) {
         if (!Pitch.integer(segment.tick)) throw new Error("Unknown segment tick");
+        var element=segment.elementAt(resolved.track);
+        // Earlier onsets can still occupy the target interval. Unknown lengths
+        // before its end cannot prove non-overlap and must fail closed.
+        if (element && segment.tick<end
+                && (element.type===plugin.Element.CHORD || element.type===plugin.Element.REST)) {
+            var span=Duration.ticks(element.actualDuration);
+            if (!span || !Pitch.integer(segment.tick+span)) throw new Error("Unknown native rhythmic coverage");
+            if (segment.tick+span>resolved.tick && !element.is(resolved.element)) {
+                throw new Error("Target interval overlaps another event");
+            }
+        }
         if (segment.tick<resolved.tick || segment.tick>=end) continue;
         if (!segment.annotations || !Pitch.integer(segment.annotations.length)) throw new Error("Unknown annotations");
         for (var index=0; index<segment.annotations.length; index++) {
@@ -117,9 +137,6 @@ function intervalClear(plugin,resolved,length) {
                 throw new Error("Target interval contains an annotation");
             }
         }
-        var element=segment.elementAt(resolved.track);
-        if (element && (element.type===plugin.Element.CHORD || element.type===plugin.Element.REST)
-                && !element.is(resolved.element)) throw new Error("Target interval overlaps another event");
         if (element && segment.tick>resolved.tick) throw new Error("Target interval contains native notation");
     }
 }
@@ -181,7 +198,7 @@ function edit(plugin,params,fill) {
     if (scoreError) return failure(params,"target_unavailable",scoreError.error,"not_applied");
     if (plugin.mscoreMajorVersion!==4 || !Pitch.integer(plugin.mscoreMinorVersion)
             || plugin.mscoreMinorVersion<7 || typeof plugin.fraction!=="function"
-            || !plugin.curScore.spanners || !plugin.Segment || !Pitch.integer(plugin.Segment.ChordRest)) {
+            || !spannerListAvailable(plugin) || !plugin.Segment || !Pitch.integer(plugin.Segment.ChordRest)) {
         return failure(params,"unsupported_native_api","Requires MuseScore 4.7+ native input and spanner metadata","not_applied");
     }
     if (!Pitch.integer(params.measure) || params.measure<1 || !Pitch.integer(params.staff)
@@ -221,7 +238,7 @@ function edit(plugin,params,fill) {
             throw new Error("Requested spelling cannot be represented in native written TPC");
         }
         intervalClear(plugin,resolved,oldLength);
-        Duration.spanners(plugin,resolved.tick,resolved.tick+oldLength);
+        spanners(plugin,resolved.tick,resolved.tick+oldLength);
         beforeState=state(plugin,params);
         cursor=cursorAt(plugin,resolved,params);
         cursor.setDuration(fill ? params.duration.numerator : newLength,

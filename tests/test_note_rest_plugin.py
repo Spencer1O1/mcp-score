@@ -271,3 +271,68 @@ def test_octave_transposing_rest_fill_keeps_requested_concert_midi() -> None:
     result = NoteRestEdit.model_validate(_snake_case_keys(observed["reply"]["result"]))
     note = result.after[0].notes[0]
     assert (note.pitch, note.tpc, note.written_tpc) == (61, 21, 21)
+
+
+@pytest.mark.parametrize(
+    "stretch",
+    [
+        "{}",
+        "{numerator:1}",
+        "{denominator:1}",
+        "{numerator:0,denominator:0}",
+        "{numerator:-1,denominator:-1}",
+        "{numerator:1.5,denominator:1.5}",
+        "{numerator:'1',denominator:'1'}",
+        "{numerator:true,denominator:true}",
+        "{numerator:NaN,denominator:NaN}",
+        "{numerator:Infinity,denominator:Infinity}",
+        "{numerator:9007199254740992,denominator:9007199254740992}",
+    ],
+)
+def test_malformed_native_unit_stretch_cannot_open_mutation(stretch: str) -> None:
+    observed = _run("staff.timeStretch=()=> (" + stretch + ");")
+    assert observed["reply"]["mutation_status"] == "not_applied"
+    assert observed["starts"] == observed["writes"] == observed["cancels"] == 0
+    assert observed["history"] == ["prior"]
+
+
+@pytest.mark.parametrize(
+    "spans",
+    [
+        "{}",
+        "{length:-1}",
+        "{length:'0'}",
+        "{length:0.5}",
+        "{length:false}",
+        "{length:Infinity}",
+        "{length:NaN}",
+        "{length:9007199254740992}",
+    ],
+)
+def test_unknown_native_spanner_list_never_proves_empty(spans: str) -> None:
+    observed = _run("score.spanners=" + spans + ";")
+    assert observed["reply"]["mutation_status"] == "not_applied"
+    assert observed["starts"] == observed["writes"] == 0
+    assert observed["history"] == ["prior"]
+
+
+def test_malformed_postcommit_spanner_list_retains_applied_unverified_status() -> None:
+    observed = _run("controls.postCommit=()=>{score.spanners={};};")
+    assert observed["reply"]["mutation_status"] == "applied_unverified"
+    assert observed["cancels"] == 0 and observed["history"] == ["prior", "edit"]
+
+
+@pytest.mark.parametrize("earlier_length", ["frac(1,2)", "null", "{}", "frac(0,1)"])
+def test_earlier_same_voice_overlap_or_unknown_duration_rejects_before_command(
+    earlier_length: str,
+) -> None:
+    observed = _run(
+        "current=rest(480);const earlier=chord(960);"
+        "earlier.actualDuration=" + earlier_length + ";"
+        "const first=segment(0,earlier,peer);const target=segment(480,current);"
+        "first.nextInMeasure=target;segments=[first,target];measure.firstSegment=first;"
+        "params.offset=frac(1,4);params.expected=snapshot();"
+    )
+    assert observed["reply"]["mutation_status"] == "not_applied"
+    assert observed["starts"] == observed["writes"] == 0
+    assert observed["history"] == ["prior"]

@@ -591,7 +591,8 @@ execution. Normal raw/legacy mutations remain outside this duplicate guarantee.
 `fill_live_rest` (`fillRestWithNote`) replaces the onset of an existing plain
 rest with one pitched note. `replace_live_note_with_rest`
 (`replaceNoteWithRest`) replaces one ordinary single-tone chord with an
-equal-duration rest. Neither operation shifts later events or opens occupied
+equal-duration rest coverage (native rhythmic decomposition may split rests).
+Neither operation shifts later events or opens occupied
 time. Supply explicit measure/staff/voice/exact offset and the **entire fresh
 voice-measure event list** as `expected`; fill also requires concert MIDI
 `pitch`, concert `tpc`, and a requested `duration`. A stale snapshot rejects

@@ -227,7 +227,10 @@ async def test_unsafe_and_stale_requests_reject_without_changing_passage() -> No
     try:
         before = await _baseline(bridge)
         stale = _request(before, 2, 0, 0, True)
-        stale.expected[-1].notes[0].written_tpc += 1
+        stale_note = next(
+            event for event in stale.expected if event.kind == "chord" and event.notes
+        )
+        stale_note.notes[0].written_tpc += 1
         too_long = _request(before, 2, 0, 0, True, full=True)
         attached = _request(before, 3, 0, 0, False)
         dotted = _request(before, 4, 0, 0, True)
