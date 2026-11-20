@@ -548,9 +548,14 @@ def claim_profile(layout: Layout) -> None:
     validate_artifact_boundary(layout)
     root = layout.root
     marker = root / PROFILE_MARKER
+    if marker.is_symlink():
+        raise HarnessError("Refusing a symlinked profile ownership marker")
     if root.is_symlink():
         raise HarnessError("The test profile must not be a symlink")
     for path in (
+        layout.state_file,
+        layout.state_file.with_suffix(".tmp"),
+        layout.data_dir / "extensions/config.json",
         layout.preferences.file,
         layout.data_dir,
         layout.plugins_dir,
@@ -559,9 +564,23 @@ def claim_profile(layout: Layout) -> None:
     ):
         if not path.resolve().is_relative_to(root.resolve()):
             raise HarnessError(f"Profile path escapes the private root: {path}")
+        for component in (path, *path.parents):
+            if component == root:
+                break
+            if component.is_symlink():
+                raise HarnessError(f"Symlinked profile control path: {component}")
     if root.exists():
         for path in root.rglob("*"):
-            if path.is_symlink() and not path.resolve().is_relative_to(root.resolve()):
+            if path.is_symlink() and (
+                path.is_relative_to(layout.plugins_dir)
+                or path.is_relative_to(layout.data_dir / "extensions")
+            ):
+                raise HarnessError(f"Symlinked plugin control path: {path}")
+            if (
+                path.is_symlink()
+                and not path.resolve().is_relative_to(root.resolve())
+                and not path.is_relative_to(root / "myStyles")
+            ):
                 raise HarnessError(f"Private profile symlink escapes its root: {path}")
     if marker.exists():
         if marker.read_text() != PROFILE_MARKER_CONTENT:
@@ -607,7 +626,13 @@ class OwnedProcess:
 
 
 def identify(process: psutil.Process, kind: str) -> OwnedProcess:
-    return OwnedProcess(process.pid, process.create_time(), process.exe(), kind)
+    created = process.create_time()
+    executable = process.exe()
+    if not executable or process.status() == psutil.STATUS_ZOMBIE:
+        # A short-lived child may still have a psutil handle after its executable
+        # disappears. It cannot authorize ownership; persisted records stay strict.
+        raise psutil.NoSuchProcess(process.pid)
+    return OwnedProcess(process.pid, created, executable, kind)
 
 
 def matching_process(identity: OwnedProcess) -> psutil.Process | None:
@@ -706,7 +731,10 @@ def refresh_owned(layout: Layout) -> None:
             normalized = True
         try:
             for child in process.children(recursive=True):
-                child_identity = identify(child, identity.kind)
+                try:
+                    child_identity = identify(child, identity.kind)
+                except psutil.NoSuchProcess, psutil.ZombieProcess:
+                    continue
                 if child_identity not in identities and child_identity not in additions:
                     additions.append(child_identity)
         except psutil.NoSuchProcess, psutil.ZombieProcess:
@@ -1243,8 +1271,17 @@ def collect_logs(settings: Settings, destination: Path) -> None:
     if settings.system == "Darwin" and settings.macos_runner_mode:
         paths.append(require_macos_runner(settings).data_dir / "logs")
     for path in paths:
+        if path.is_symlink():
+            continue
         if path.is_dir():
-            shutil.copytree(path, destination / path.name, dirs_exist_ok=True)
+            shutil.copytree(
+                path,
+                destination / path.name,
+                dirs_exist_ok=True,
+                ignore=lambda directory, names: [
+                    name for name in names if (Path(directory) / name).is_symlink()
+                ],
+            )
         elif path.is_file():
             shutil.copy2(path, destination / path.name)
 
@@ -1260,6 +1297,11 @@ def clean(settings: Settings) -> None:
     claim_profile(settings.layout)
     with profile_lock(settings.layout):
         stop_owned(settings.layout)
+        # MuseScore creates myStyles/Built-in styles -> application bundle.
+        # Remove passive asset links themselves, never their external targets.
+        for asset in (settings.layout.root / "myStyles").rglob("*"):
+            if asset.is_symlink():
+                asset.unlink()
         shutil.rmtree(settings.layout.root)
 
 

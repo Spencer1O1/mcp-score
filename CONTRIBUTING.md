@@ -131,7 +131,13 @@ occupied bridge/display endpoint. The process record stores launched PIDs,
 creation times, and executable identities, including application descendants and
 Xvfb. `stop` terminates only identities that still match that record; it never
 kills applications by name or removes another display's socket. Stale PID records
-do not authorize signaling a reused PID. The profile and desktop must use English
+do not authorize signaling a reused PID. Exited/zombie descendants without an
+executable identity are omitted during live discovery; persisted ownership
+records still require complete identities. Root, marker, state, preferences,
+lock, and plugin control links remain refused. MuseScore's passive built-in
+style links below a real `myStyles` directory may point into its app bundle;
+cleanup unlinks those assets without following targets. Log collection skips
+all symlink roots and descendants. The profile and desktop must use English
 menu labels.
 
 `stop` retains the marked artifacts and logs for inspection. Collect them before

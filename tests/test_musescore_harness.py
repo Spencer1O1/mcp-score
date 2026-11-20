@@ -1106,3 +1106,122 @@ def test_mac_default_cache_artifact_root_is_disjoint_from_native_paths(
         harness.clean(legitimate)
         assert not root.exists()
         assert account.home.exists()
+
+
+def test_refresh_skips_exited_empty_executable_child_and_keeps_valid_sibling(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    parent = harness.OwnedProcess(10, 100.0, "/owned/app", "musescore")
+    harness.save_owned(settings.layout, [parent])
+    process = MagicMock()
+    process.exe.return_value = parent.executable
+    empty = MagicMock(pid=11)
+    empty.create_time.return_value = 101.0
+    empty.exe.return_value = ""
+    zombie = MagicMock(pid=12)
+    zombie.create_time.return_value = 102.0
+    zombie.exe.return_value = "/owned/helper"
+    zombie.status.return_value = harness.psutil.STATUS_ZOMBIE
+    valid = MagicMock(pid=13)
+    valid.create_time.return_value = 103.0
+    valid.exe.return_value = "/owned/helper"
+    valid.status.return_value = harness.psutil.STATUS_RUNNING
+    process.children.return_value = [empty, zombie, valid]
+    with patch.object(harness, "matching_process", return_value=process):
+        harness.refresh_owned(settings.layout)
+    assert [item.pid for item in harness.read_owned(settings.layout)] == [10, 13]
+    # Discovery races do not make a forged persisted empty identity acceptable.
+    settings.layout.state_file.write_text(
+        json.dumps(
+            {
+                "version": harness.PROCESS_STATE_VERSION,
+                "processes": [
+                    {"pid": 11, "created": 101.0, "executable": "", "kind": "musescore"}
+                ],
+            }
+        )
+    )
+    with pytest.raises(harness.HarnessError, match="Invalid private process"):
+        harness.read_owned(settings.layout)
+
+
+def test_passive_style_links_are_unlinked_without_following_bundle_target(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    styles = settings.layout.root / "myStyles"
+    styles.mkdir()
+    bundle = tmp_path / "app-bundle/styles"
+    bundle.mkdir(parents=True)
+    sentinel = bundle / "builtin.mss"
+    sentinel.write_text("external bundle untouched")
+    (styles / "Built-in styles").symlink_to(bundle, target_is_directory=True)
+    (styles / "single-style").symlink_to(sentinel)
+    harness.claim_profile(settings.layout)
+    harness.stop(settings)
+    harness.clean(settings)
+    assert not settings.layout.root.exists()
+    assert sentinel.read_text() == "external bundle untouched"
+
+
+@pytest.mark.parametrize(
+    "control",
+    ["marker", "state", "preferences", "styles-root", "extensions", "plugin-code"],
+)
+def test_passive_assets_do_not_authorize_control_path_symlinks(
+    tmp_path: Path, control: str
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    controls = {
+        "marker": settings.layout.root / harness.PROFILE_MARKER,
+        "state": settings.layout.state_file,
+        "preferences": settings.layout.preferences.file,
+        "styles-root": settings.layout.root / "myStyles",
+        "extensions": settings.layout.data_dir / "extensions/config.json",
+        "plugin-code": settings.layout.plugins_dir / "bridge/plugin.qml",
+    }
+    target = settings.layout.root / "passive-target"
+    target.write_text(
+        harness.PROFILE_MARKER_CONTENT if control == "marker" else "untouched"
+    )
+    link = controls[control]
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.exists():
+        link.unlink()
+    link.symlink_to(target)
+    with (
+        patch.object(harness, "stop_owned") as stop_owned,
+        pytest.raises(harness.HarnessError, match="[Ss]ymlink"),
+    ):
+        harness.clean(settings)
+    stop_owned.assert_not_called()
+    assert target.exists()
+
+
+def test_log_collection_skips_symlinks_instead_of_reading_external_targets(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    settings.layout.log_dir.mkdir(parents=True)
+    (settings.layout.log_dir / "owned.log").write_text("owned log")
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "unrelated.log"
+    sentinel.write_text("do not copy")
+    (settings.layout.log_dir / "linked-dir").symlink_to(
+        external, target_is_directory=True
+    )
+    (settings.layout.log_dir / "linked-file").symlink_to(sentinel)
+    settings.layout.stdout_log.symlink_to(sentinel)
+    destination = tmp_path / "collected"
+    harness.collect_logs(settings, destination)
+    assert (destination / "logs/owned.log").read_text() == "owned log"
+    assert not (destination / "logs/linked-dir").exists()
+    assert not (destination / "logs/linked-file").exists()
+    assert not (destination / "musescore.log").exists()
+    assert sentinel.read_text() == "do not copy"
