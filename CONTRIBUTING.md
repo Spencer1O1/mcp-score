@@ -99,12 +99,29 @@ MCP_SCORE_INTEGRATION=1 pytest tests/integration/test_musescore_bridge.py
 uv run scripts/musescore_harness.py stop
 ```
 
-`start` uses a marked private profile under the harness cache. Linux redirects
-only the child process's XDG directories. Windows extracts the official portable
-build into that profile and launches its executable directly; it does not install
-an MSI or run the PortableApps launcher. macOS uses `CFFIXED_USER_HOME`, per-child
-`__CFPREFERENCES_AVOID_DAEMON`, and an absolute private preferences plist. `HOME` is unchanged. Document, plugin, and
-temporary paths are private as well.
+On Linux and Windows, `start` uses a marked private profile under the harness
+cache. Linux redirects only the child process's XDG directories. Windows extracts
+the official portable build into that profile and launches its executable
+directly; it does not install an MSI or run the PortableApps launcher. `HOME` is
+unchanged. Document, plugin, and temporary paths are private as well.
+
+Local/default macOS startup refuses before profile writes. Native CFPreferences
+isolation could not be demonstrated on the supported macOS runner, even with
+CoreFoundation home and preference-daemon overrides. The macOS CI job therefore
+uses the **whole disposable GitHub-hosted runner account** as its boundary. This
+requires `MUSESCORE_MACOS_RUNNER_ISOLATION=1`, hosted macOS Actions metadata, and
+consistent runner account/home/temp paths; local and self-hosted environments
+are rejected. These checks protect against accidental use, not forged metadata.
+This mode intentionally changes the disposable account's native MuseScore
+preferences and data; it makes no per-process profile-preservation claim.
+
+The macOS account paths remain separate from the marked artifact root. Before
+each fixture launch, the exact native MuseScore `session` directory is atomically
+renamed into a unique backup inside that root. This prevents session recovery
+from overriding the fixture. Symlinked sources are refused; failed moves leave
+the source intact, with no copy/delete fallback. `clean` removes only marked
+artifacts and session backups, never the account home or native data tree.
+Remaining native preferences/data are left for hosted-runner disposal.
 
 Before configuration writes, startup refuses an existing MuseScore process or
 occupied bridge/display endpoint. The process record stores launched PIDs,
@@ -114,7 +131,7 @@ kills applications by name or removes another display's socket. Stale PID record
 do not authorize signaling a reused PID. The profile and desktop must use English
 menu labels.
 
-`stop` retains the private profile and logs for inspection. Collect them before
+`stop` retains the marked artifacts and logs for inspection. Collect them before
 removing the profile:
 
 ```bash
@@ -122,22 +139,25 @@ uv run scripts/musescore_harness.py collect-logs musescore-logs
 uv run scripts/musescore_harness.py clean
 ```
 
-CI snapshots the ordinary application profile after headless rendering, then
-asserts that live harness startup, fixture changes, and cleanup leave it
-unchanged. Startup also verifies current logs and new preference writes in the
-private profile. On macOS it first verifies private native-domain reads and
-Foundation's data-directory resolution, before launching MuseScore.
+Linux and Windows CI snapshot the ordinary application profile after headless
+rendering, then assert that live startup, fixture changes, and cleanup leave it
+unchanged. Startup requires current application logs and persisted preferences
+inside the declared boundary. macOS retains the same real live tests and records
+an explicit account-boundary report after cleanup, including expected native
+profile mutations, session moves, artifact removal, and no remaining MuseScore
+processes. It does not assert ordinary-profile preservation in whole-runner mode.
 
 The harness reads these environment variables:
 
-| Variable                 | Meaning                                                                                                              |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `MUSESCORE_VERSION`      | Release to install; defaults to the newest in `tests/integration/musescore-versions.json`                            |
-| `MUSESCORE_PROFILE_DIR`  | Optional private test-profile directory; an existing nonempty unowned directory is refused.                          |
-| `MUSESCORE_DOWNLOAD_URL` | Asset to download; otherwise the release is looked up through the GitHub releases API                                |
-| `GITHUB_TOKEN`           | Raises the GitHub API rate limit for that lookup                                                                     |
-| `MUSESCORE_CACHE_DIR`    | Where downloads and the unpacked application live; defaults to `~/.cache/mcp-score/musescore-<version>`              |
-| `MUSESCORE_DISPLAY`      | Linux only: the Xvfb display the GUI runs on, default `:87` (not `:99`, which `xvfb-run` takes for the render tests) |
+| Variable                           | Meaning                                                                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `MUSESCORE_MACOS_RUNNER_ISOLATION` | macOS CI only: explicit `1` opt-in to the verified disposable GitHub-hosted runner account boundary; local/self-hosted use is refused. |
+| `MUSESCORE_VERSION`                | Release to install; defaults to the newest in `tests/integration/musescore-versions.json`                                              |
+| `MUSESCORE_PROFILE_DIR`            | Optional private test-profile directory; an existing nonempty unowned directory is refused.                                            |
+| `MUSESCORE_DOWNLOAD_URL`           | Asset to download; otherwise the release is looked up through the GitHub releases API                                                  |
+| `GITHUB_TOKEN`                     | Raises the GitHub API rate limit for that lookup                                                                                       |
+| `MUSESCORE_CACHE_DIR`              | Where downloads and the unpacked application live; defaults to `~/.cache/mcp-score/musescore-<version>`                                |
+| `MUSESCORE_DISPLAY`                | Linux only: the Xvfb display the GUI runs on, default `:87` (not `:99`, which `xvfb-run` takes for the render tests)                   |
 
 ## PR process
 

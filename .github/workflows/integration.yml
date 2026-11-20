@@ -198,6 +198,9 @@ jobs:
     env:
       MUSESCORE_VERSION: ${{ needs.versions.outputs.latest }}
       MUSESCORE_CACHE_DIR: ${{ github.workspace }}/.musescore
+      # Native CFPreferences cannot be proven private per-process on this OS.
+      # This explicit mode uses the disposable GitHub-hosted runner account.
+      MUSESCORE_MACOS_RUNNER_ISOLATION: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -221,7 +224,7 @@ jobs:
           MCP_SCORE_MUSESCORE_PATH: ${{ steps.musescore.outputs.executable }}
         run: uv run pytest tests/integration/test_musescore_render.py -v
 
-      - name: Snapshot ordinary user profile after headless rendering
+      - name: Record disposable runner account profile before live tests
         id: profile_snapshot
         run: uv run scripts/musescore_harness.py snapshot-normal-profile musescore-profile-before.json
 
@@ -245,17 +248,17 @@ jobs:
         if: always()
         run: uv run scripts/musescore_harness.py stop
 
-      - name: Collect private profile logs
+      - name: Collect owned artifact and disposable account logs
         if: always()
         run: uv run scripts/musescore_harness.py collect-logs musescore-logs
 
-      - name: Remove owned private profile after log collection
+      - name: Remove owned artifacts after log collection
         if: always()
         run: uv run scripts/musescore_harness.py clean
 
-      - name: Verify ordinary user profile was not changed
+      - name: Audit explicit disposable runner account boundary after cleanup
         if: always() && steps.profile_snapshot.outcome == 'success'
-        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
+        run: uv run scripts/musescore_harness.py verify-runner-account-boundary musescore-profile-before.json musescore-logs/runner-account-boundary.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

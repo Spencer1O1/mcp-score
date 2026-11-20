@@ -5,8 +5,8 @@ Subcommands:
     install         Download MuseScore into the cache and print the executable
     start <score>   Launch MuseScore with a score and the bridge plugin listening
     stop            Stop only recorded, identity-verified owned processes
-    collect-logs    Copy logs from the private profile
-    clean           Stop owned processes and remove the private profile
+    collect-logs    Copy logs from the declared test boundary
+    clean           Stop owned processes and remove owned artifacts
 
 Works on Linux (AppImage under Xvfb), Windows (official portable build), and
 macOS (DMG). The version defaults to the newest one listed in
@@ -16,9 +16,10 @@ through the GitHub releases API (``GITHUB_TOKEN`` raises the rate limit)
 unless ``MUSESCORE_DOWNLOAD_URL`` names it directly. ``MUSESCORE_CACHE_DIR``
 is where downloads and the unpacked application live.
 
-The default test profile is private to the harness cache. Starting refuses an
-existing application or occupied endpoint before writing configuration. HOME
-and the ordinary MuseScore profile are never redirected or rewritten.
+Linux and Windows use a private test profile. macOS defaults fail closed;
+explicit disposable GitHub-hosted runner mode uses that runner account as its
+isolation boundary. Existing applications/endpoints are refused before writes.
+HOME is never repurposed or adopted as a harness artifact directory.
 """
 
 from __future__ import annotations
@@ -219,8 +220,9 @@ def layout_for(system: str, profile_root: Path) -> Layout:
     """Resolve only paths under an explicitly private test profile root.
 
     Windows uses the official WIN_PORTABLE build, whose QSettings and app data
-    live relative to the extracted executable. macOS uses CoreFoundation's
-    CFFIXED_USER_HOME; Linux uses per-child XDG directories. HOME is unchanged.
+    live relative to the extracted executable; Linux uses per-child XDG directories.
+    On macOS this is only the owned artifact layout, not native account paths.
+    HOME is unchanged.
     """
     root = profile_root.absolute()
     if system == "Windows":
@@ -281,6 +283,8 @@ class Settings:
     layout: Layout
     download_url: str | None = None
     """An explicit asset URL; otherwise the release is looked up on demand."""
+    macos_runner_mode: bool = False
+    """Explicit hosted-runner account boundary; never local private-profile mode."""
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -295,7 +299,8 @@ class Settings:
         profile = Path(os.environ.get("MUSESCORE_PROFILE_DIR", cache_dir / "profile"))
         layout = layout_for(system, profile)
         url = os.environ.get("MUSESCORE_DOWNLOAD_URL") or None
-        return cls(system, version, cache_dir, layout, url)
+        runner_mode = os.environ.get("MUSESCORE_MACOS_RUNNER_ISOLATION") == "1"
+        return cls(system, version, cache_dir, layout, url, runner_mode)
 
     def resolve_download_url(self) -> str:
         return self.download_url or release_asset_url(self.system, self.version)
@@ -308,6 +313,66 @@ class Settings:
         if self.system == "Darwin":
             return self.cache_dir / "MuseScore 4.app" / "Contents" / "MacOS" / "mscore"
         return self.cache_dir / "squashfs-root" / "AppRun"
+
+
+@dataclass(frozen=True)
+class MacRunnerAccountPaths:
+    """Natural disposable-account paths; never an owned Layout/cleanup root."""
+
+    home: Path
+    preferences_file: Path
+    data_dir: Path
+
+
+def local_account() -> tuple[str, Path]:
+    import pwd
+
+    account = pwd.getpwuid(os.getuid())
+    return account.pw_name, Path(account.pw_dir)
+
+
+def require_macos_runner(settings: Settings) -> MacRunnerAccountPaths:
+    """Accidental-use guard for an explicitly disposable hosted Mac account.
+
+    Environment metadata is evidence for the supported CI deployment, not a
+    security sandbox or proof against deliberately forged environment values.
+    """
+    required = {
+        "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "RUNNER_OS": "macOS",
+    }
+    if (
+        settings.system != "Darwin"
+        or not settings.macos_runner_mode
+        or platform.system() != "Darwin"
+        or any(os.environ.get(key) != value for key, value in required.items())
+        or not os.environ.get("GITHUB_RUN_ID", "").isdigit()
+    ):
+        raise HarnessError(
+            "Local/default macOS harness startup is disabled: private native "
+            "preferences are not isolated. Explicit disposable GitHub-hosted "
+            "macOS runner mode is required."
+        )
+    name, home = local_account()
+    home = home.resolve()
+    temporary = os.environ.get("RUNNER_TEMP")
+    if (
+        name != "runner"
+        or Path.home().resolve() != home
+        or not temporary
+        or not Path(temporary).is_dir()
+        or not Path(temporary).resolve().is_relative_to(home)
+    ):
+        raise HarnessError("Hosted macOS runner account/home/temp evidence disagrees")
+    preferences = home / "Library/Preferences" / f"{MACOS_PREFERENCES_DOMAIN}.plist"
+    data = home / "Library/Application Support/MuseScore/MuseScore4"
+    if not all(path.resolve() == path for path in (preferences, data)):
+        raise HarnessError(
+            "Natural runner profile paths are symlinked or escape "
+            "the disposable account"
+        )
+    return MacRunnerAccountPaths(home, preferences, data)
 
 
 # ── install ───────────────────────────────────────────────────────────
@@ -386,6 +451,15 @@ def install(settings: Settings) -> Path:
 # ── start ─────────────────────────────────────────────────────────────
 
 
+def startup_preferences(layout: Layout) -> dict[str, bool | str]:
+    preferences = dict(STARTUP_PREFERENCES)
+    preferences["mcp-score/profileNonce"] = uuid.uuid4().hex
+    for name in PATH_PREFERENCES:
+        destination = layout.plugins_dir if name == "myPlugins" else layout.root / name
+        preferences[f"application/paths/{name}"] = destination.as_posix()
+    return preferences
+
+
 def seed_configuration(layout: Layout) -> None:
     """Install and enable the bridge as the only manually activated plugin.
 
@@ -394,11 +468,7 @@ def seed_configuration(layout: Layout) -> None:
     """
     install_plugin(layout.plugins_dir)
 
-    preferences = dict(STARTUP_PREFERENCES)
-    preferences["mcp-score/profileNonce"] = uuid.uuid4().hex
-    for name in PATH_PREFERENCES:
-        destination = layout.plugins_dir if name == "myPlugins" else layout.root / name
-        preferences[f"application/paths/{name}"] = destination.as_posix()
+    preferences = startup_preferences(layout)
     layout.preferences.write(preferences)
 
     extensions_dir = layout.data_dir / "extensions"
@@ -427,10 +497,9 @@ def child_environment(settings: Settings) -> dict[str, str]:
     environment["QSG_RHI_PIPELINE_CACHE_LOAD"] = pipeline_cache
     environment["QSG_RHI_PIPELINE_CACHE_SAVE"] = pipeline_cache
     if settings.system == "Darwin":
-        environment["CFFIXED_USER_HOME"] = str(root)
-        # CoreFoundation otherwise delegates native preferences to the shared
-        # cfprefsd, which does not inherit this child's private home override.
-        environment["__CFPREFERENCES_AVOID_DAEMON"] = "1"
+        require_macos_runner(settings)
+        environment.pop("CFFIXED_USER_HOME", None)
+        environment.pop("__CFPREFERENCES_AVOID_DAEMON", None)
     elif settings.system == "Windows":
         # Qt itself uses WIN_PORTABLE paths, not these environment variables;
         # these also keep environment-based library caches in the private root.
@@ -453,6 +522,8 @@ def claim_profile(layout: Layout) -> None:
     """Reserve a new private directory, refusing to adopt existing user data."""
     root = layout.root
     marker = root / PROFILE_MARKER
+    if Path.home().resolve().is_relative_to(root.resolve()):
+        raise HarnessError("A home directory or its ancestor cannot be a test profile")
     if root.is_symlink():
         raise HarnessError("The test profile must not be a symlink")
     for path in (
@@ -715,7 +786,7 @@ def start_xvfb(settings: Settings) -> None:
 
 
 def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
-    """Launch in the private profile and record ownership before waiting."""
+    """Launch in the declared boundary and record ownership before waiting."""
     for attempt in range(1, LAUNCH_ATTEMPTS + 1):
         process = _start(settings, score)
         expected_executable = (
@@ -736,7 +807,7 @@ def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
 
 
 def _start(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
-    logger.info("launching MuseScore with private profile %s", settings.layout.root)
+    logger.info("launching MuseScore; owned artifact root %s", settings.layout.root)
     command = [str(settings.executable), str(score)]
     if settings.system == "Linux":
         # Avoid recording the transient /usr/bin/env from AppRun's shebang.
@@ -905,81 +976,120 @@ async def wait_for_bridge(uri: str, timeout_seconds: float) -> bool:
 
 
 def verify_private_paths(settings: Settings) -> None:
-    """Verify actual application log and preference writes in the private root."""
+    """Verify application writes in the declared private or runner boundary."""
     launched = [
         item.created for item in read_owned(settings.layout) if item.kind == "musescore"
     ]
+    account = require_macos_runner(settings) if settings.system == "Darwin" else None
+    log_dir = account.data_dir / "logs" if account else settings.layout.log_dir
     current_logs = [
         path
-        for path in settings.layout.log_dir.glob("*.log")
+        for path in log_dir.glob("*.log")
         if launched and path.stat().st_mtime >= min(launched)
     ]
     if not current_logs:
-        raise HarnessError("MuseScore did not create current private application logs")
-    if settings.system == "Darwin":
-        with settings.layout.preferences.file.open("rb") as source:
-            values = plistlib.load(source)
-        persisted = bool(values.get("cloud.clientId"))
+        raise HarnessError(
+            "MuseScore did not create current application logs in its declared boundary"
+        )
+    if account:
+        result = run(
+            ["defaults", "read", MACOS_PREFERENCES_DOMAIN, "cloud.clientId"],
+            env=child_environment(settings),
+        )
+        persisted = bool(result.stdout.strip())
     else:
         values_ini = configparser.RawConfigParser()
         values_ini.read(settings.layout.preferences.file)
         persisted = bool(values_ini.get("cloud", "clientId", fallback=""))
     if not persisted:
         raise HarnessError(
-            "MuseScore did not persist new preferences in the private profile"
+            "MuseScore did not persist preferences in its declared boundary"
         )
 
 
-def verify_macos_preferences(settings: Settings) -> None:
-    """Prove native preference reads and Foundation paths before launching Qt."""
-    if settings.system != "Darwin":
-        return
-    with settings.layout.preferences.file.open("rb") as source:
-        expected_nonce = plistlib.load(source)["mcp-score.profileNonce"]
-    # Match the CFPreferencesCopyValue/SetValue APIs used by QSettings itself;
-    # the defaults utility may use daemon behavior specific to that utility.
-    native_probe = (
-        'ObjC.import("CoreFoundation"); '
-        f"var domain = $({json.dumps(MACOS_PREFERENCES_DOMAIN)}); "
-        f"var expected = {json.dumps(expected_nonce)}; "
-        "var user = $.kCFPreferencesCurrentUser; "
-        "var host = $.kCFPreferencesAnyHost; "
-        'var value = $.CFPreferencesCopyValue($("mcp-score.profileNonce"), '
-        "domain, user, host); "
-        "var actual = value ? ObjC.unwrap(value) : null; "
-        'if (actual !== expected) { throw new Error("Private native nonce missing"); } '
-        '$.CFPreferencesSetValue($("mcp-score.nativeWriteNonce"), $(expected), '
-        "domain, user, host); "
-        "if (!$.CFPreferencesSynchronize(domain, user, host)) { "
-        'throw new Error("Private native preferences did not synchronize"); } '
-        "actual;"
-    )
-    result = run(
-        ["osascript", "-l", "JavaScript", "-e", native_probe],
-        env=child_environment(settings),
-    )
-    with settings.layout.preferences.file.open("rb") as source:
-        private_values = plistlib.load(source)
+def move_runner_session(settings: Settings, account: MacRunnerAccountPaths) -> None:
+    """Quarantine only the exact disposable-account session directory atomically.
+
+    Backups become explicit owned artifacts. No native directory is recursively
+    deleted, and cross-device moves fail without removing the source.
+    """
+    if account != require_macos_runner(settings):
+        raise HarnessError("Runner account paths disagree with verified account")
+    expected_data = account.home / "Library/Application Support/MuseScore/MuseScore4"
+    source = account.data_dir / "session"
     if (
-        result.stdout.strip() != expected_nonce
-        or private_values.get("mcp-score.nativeWriteNonce") != expected_nonce
+        account.data_dir != expected_data
+        or account.data_dir.resolve() != expected_data
+        or account.data_dir.is_symlink()
+        or source.is_symlink()
+        or source.resolve() != expected_data.resolve() / "session"
     ):
-        raise HarnessError("CoreFoundation did not read and write the private domain")
-    foundation = run(
-        [
-            "osascript",
-            "-l",
-            "JavaScript",
-            "-e",
-            'ObjC.import("Foundation"); '
-            "ObjC.unwrap($.NSSearchPathForDirectoriesInDomains(14, 1, true)"
-            ".objectAtIndex(0))",
-        ],
-        env=child_environment(settings),
+        raise HarnessError("Unexpected or symlinked disposable runner session path")
+    if not source.exists():
+        return
+    if not source.is_dir():
+        raise HarnessError("Disposable runner session is not a directory")
+    if any(path.is_symlink() for path in source.rglob("*")):
+        raise HarnessError("Refusing symlinks inside disposable runner session")
+    backup = settings.layout.root / f"runner-session-backup-{uuid.uuid4().hex}"
+    try:
+        source.rename(backup)
+    except OSError as error:
+        raise HarnessError(
+            "Could not atomically move disposable runner session"
+        ) from error
+    history = settings.layout.root / "runner-session-moves.json"
+    moves = json.loads(history.read_text()) if history.exists() else []
+    moves.append({"source": str(source), "owned_backup": str(backup)})
+    history.write_text(json.dumps(moves))
+    logger.info(
+        "Moved disposable runner session %s into owned backup %s", source, backup
     )
-    expected_data = settings.layout.root / "Library/Application Support"
-    if Path(foundation.stdout.strip()).resolve() != expected_data.resolve():
-        raise HarnessError("Foundation did not resolve private application data")
+
+
+def seed_macos_runner(settings: Settings, account: MacRunnerAccountPaths) -> None:
+    """Configure the disposable account explicitly, never claiming it is private."""
+    if account != require_macos_runner(settings):
+        raise HarnessError("Runner account paths disagree with verified account")
+    install_plugin(settings.layout.plugins_dir)
+    preferences = startup_preferences(settings.layout)
+    environment = child_environment(settings)
+    for key, value in preferences.items():
+        typed = (
+            ["-bool", str(value).lower()]
+            if isinstance(value, bool)
+            else ["-string", value]
+        )
+        run(
+            [
+                "defaults",
+                "write",
+                MACOS_PREFERENCES_DOMAIN,
+                key.replace("/", "."),
+                *typed,
+            ],
+            env=environment,
+        )
+    result = run(
+        ["defaults", "read", MACOS_PREFERENCES_DOMAIN, "mcp-score.profileNonce"],
+        env=environment,
+    )
+    if result.stdout.strip() != preferences["mcp-score/profileNonce"]:
+        raise HarnessError("Disposable runner native preferences did not persist")
+    extensions = account.data_dir / "extensions"
+    if extensions.resolve() != extensions or (extensions / "config.json").is_symlink():
+        raise HarnessError("Symlinked disposable runner extension configuration")
+    extensions.mkdir(parents=True, exist_ok=True)
+    enabled = [
+        {"uri": uri, "actions": [{"code": "main", "exec_point": "manually"}]}
+        for uri in PLUGIN_URIS
+    ]
+    (extensions / "config.json").write_text(json.dumps(enabled))
+    move_runner_session(settings, account)
+    logger.info(
+        "Using disposable macOS runner account profile at %s; not a private profile",
+        account.home,
+    )
 
 
 def verify_windows_portable_binary(settings: Settings) -> None:
@@ -997,6 +1107,7 @@ def verify_windows_portable_binary(settings: Settings) -> None:
 
 
 def start(settings: Settings, score: Path) -> None:
+    account = require_macos_runner(settings) if settings.system == "Darwin" else None
     if not settings.executable.exists():
         raise HarnessError(f"{settings.executable} not found; run 'install' first")
     if not score.is_file():
@@ -1008,8 +1119,10 @@ def start(settings: Settings, score: Path) -> None:
         preflight(settings)
         prepare_directories(settings.layout)
         save_owned(settings.layout, [])
-        seed_configuration(settings.layout)
-        verify_macos_preferences(settings)
+        if account:
+            seed_macos_runner(settings, account)
+        else:
+            seed_configuration(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)
@@ -1024,7 +1137,7 @@ def start(settings: Settings, score: Path) -> None:
         except BaseException:
             stop_owned(settings.layout)
             raise
-    logger.info("bridge ready in private profile %s", settings.layout.root)
+    logger.info("bridge ready; owned artifact root %s", settings.layout.root)
 
 
 @contextlib.contextmanager
@@ -1094,12 +1207,16 @@ def stop(settings: Settings) -> None:
 
 def collect_logs(settings: Settings, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
-    for path in (
+    paths = [
         settings.layout.log_dir,
         settings.layout.stdout_log,
         settings.layout.root / "xvfb.log",
         settings.layout.root / "ownership-diagnostics.json",
-    ):
+        settings.layout.root / "runner-session-moves.json",
+    ]
+    if settings.system == "Darwin" and settings.macos_runner_mode:
+        paths.append(require_macos_runner(settings).data_dir / "logs")
+    for path in paths:
         if path.is_dir():
             shutil.copytree(path, destination / path.name, dirs_exist_ok=True)
         elif path.is_file():
@@ -1177,6 +1294,52 @@ def verify_normal_profile(system: str, baseline: Path) -> None:
     logger.info("normal MuseScore profile is unchanged")
 
 
+def verify_runner_account_boundary(
+    settings: Settings, baseline: Path, report: Path
+) -> None:
+    """Audit whole-runner disposal, explicitly allowing account profile mutation."""
+    account = require_macos_runner(settings)
+    if settings.layout.root.exists():
+        raise HarnessError("Owned artifact root still exists after cleanup")
+    if musescore_running(settings):
+        raise HarnessError("A MuseScore application remains in the disposable account")
+    expected = json.loads(baseline.read_text())
+    actual = normal_profile_snapshot(settings.system)
+    changed = sorted(
+        key
+        for key in expected.keys() | actual.keys()
+        if expected.get(key) != actual.get(key)
+    )
+    if any(not Path(key).resolve().is_relative_to(account.home) for key in changed):
+        raise HarnessError("Runner profile mutation escaped the disposable account")
+    moves_file = report.parent / "runner-session-moves.json"
+    moves = json.loads(moves_file.read_text()) if moves_file.exists() else []
+    for move in moves:
+        backup = Path(move["owned_backup"])
+        if not backup.is_relative_to(settings.layout.root) or backup.exists():
+            raise HarnessError("Runner session backup was not owned and removed")
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(
+        json.dumps(
+            {
+                "isolation_boundary": "disposable-github-hosted-macos-account",
+                "account_home": str(account.home),
+                "per_process_private_profile_claim": False,
+                "native_account_mutation_expected": True,
+                "changed_native_profile_paths": changed,
+                "session_moves_to_owned_artifacts": moves,
+                "owned_artifact_root_removed": True,
+                "no_musescore_processes_remain": True,
+            },
+            indent=2,
+        )
+    )
+    logger.info(
+        "Disposable runner account boundary verified; native profile changes "
+        "are expected and left for runner disposal, not preservation"
+    )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
@@ -1221,6 +1384,9 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("clean")
     logs_parser = commands.add_parser("collect-logs")
     logs_parser.add_argument("destination", type=Path)
+    runner_parser = commands.add_parser("verify-runner-account-boundary")
+    runner_parser.add_argument("baseline", type=Path)
+    runner_parser.add_argument("report", type=Path)
     for name in ("snapshot-normal-profile", "verify-normal-profile"):
         profile_parser = commands.add_parser(name)
         profile_parser.add_argument("file", type=Path)
@@ -1240,6 +1406,8 @@ def main(argv: list[str] | None = None) -> int:
             collect_logs(settings, args.destination)
         elif args.command == "snapshot-normal-profile":
             snapshot_normal_profile(settings.system, args.file)
+        elif args.command == "verify-runner-account-boundary":
+            verify_runner_account_boundary(settings, args.baseline, args.report)
         else:
             verify_normal_profile(settings.system, args.file)
     except HarnessError as error:

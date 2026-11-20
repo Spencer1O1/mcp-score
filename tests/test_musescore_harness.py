@@ -9,6 +9,8 @@ import plistlib
 import socket
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,6 +20,7 @@ import pytest
 from mcp_score.musescore.paths import PLUGIN_DIRECTORY_NAME, PLUGIN_QML_NAME
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from types import ModuleType
 
 _HARNESS_PATH = Path(__file__).parent.parent / "scripts" / "musescore_harness.py"
@@ -272,6 +275,7 @@ class TestLaunch:
             patch.object(harness, "track_process"),
             patch.object(harness, "refresh_owned"),
             patch.object(harness, "STARTUP_SECONDS", 0),
+            patch.object(harness, "child_environment", return_value={}),
         ):
             # Act
             process = harness.launch(self._settings(tmp_path), tmp_path / "s.xml")
@@ -294,6 +298,7 @@ class TestLaunch:
             patch.object(harness, "track_process"),
             patch.object(harness, "refresh_owned"),
             patch.object(harness, "STARTUP_SECONDS", 0),
+            patch.object(harness, "child_environment", return_value={}),
             pytest.raises(harness.HarnessError, match="exited during startup"),
         ):
             # Act / Assert
@@ -550,7 +555,7 @@ class TestOwnership:
 
 
 class TestPrivateEnvironment:
-    @pytest.mark.parametrize("system", ["Linux", "Windows", "Darwin"])
+    @pytest.mark.parametrize("system", ["Linux", "Windows"])
     def test_child_paths_are_private_without_repurposing_home(
         self, tmp_path: Path, system: str
     ) -> None:
@@ -570,41 +575,9 @@ class TestPrivateEnvironment:
         )
         if system == "Linux":
             assert environment["XDG_DATA_HOME"] == str(settings.layout.root / "data")
-        if system == "Darwin":
-            assert environment["CFFIXED_USER_HOME"] == str(settings.layout.root)
-            assert environment["__CFPREFERENCES_AVOID_DAEMON"] == "1"
         if system == "Windows":
             assert settings.executable.is_relative_to(settings.layout.root)
             assert "Program Files" not in str(settings.executable)
-
-    def test_macos_probe_reads_private_native_domain_only(self, tmp_path: Path) -> None:
-        settings = make_settings(tmp_path, "Darwin")
-        harness.seed_configuration(settings.layout)
-        with settings.layout.preferences.file.open("rb") as source:
-            nonce = plistlib.load(source)["mcp-score.profileNonce"]
-        calls: list[tuple[list[str], dict[str, Any]]] = []
-
-        def native_response(command: list[str], **kwargs: Any) -> MagicMock:
-            calls.append((command, kwargs))
-            if len(calls) == 1:
-                with settings.layout.preferences.file.open("rb") as source:
-                    values = plistlib.load(source)
-                values["mcp-score.nativeWriteNonce"] = nonce
-                with settings.layout.preferences.file.open("wb") as output:
-                    plistlib.dump(values, output)
-                return MagicMock(stdout=nonce + "\n")
-            return MagicMock(
-                stdout=str(settings.layout.root / "Library/Application Support") + "\n"
-            )
-
-        with patch.object(harness, "run", side_effect=native_response):
-            harness.verify_macos_preferences(settings)
-        assert calls[0][0][0:4] == ["osascript", "-l", "JavaScript", "-e"]
-        script = calls[0][0][4]
-        assert script.index("actual !== expected") < script.index(
-            "CFPreferencesSetValue"
-        )
-        assert calls[0][1]["env"]["CFFIXED_USER_HOME"] == str(settings.layout.root)
 
     def test_normal_profile_snapshot_detects_changed_bytes(
         self, tmp_path: Path
@@ -843,23 +816,226 @@ def test_stopped_owned_listener_time_wait_does_not_block_fixture_restart(
         harness.preflight(settings)
 
 
-def test_macos_failed_native_read_performs_no_probe_fallback_or_launch(
+@contextmanager
+def hosted_mac(tmp_path: Path) -> Iterator[tuple[Any, Any]]:
+    """Mock hosted runner policy only; never access the real account profile."""
+    home = tmp_path / "runner"
+    temporary = home / "work/_temp"
+    temporary.mkdir(parents=True)
+    settings = replace(
+        make_settings(tmp_path / "artifacts", "Darwin"), macos_runner_mode=True
+    )
+    environment = {
+        "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "RUNNER_OS": "macOS",
+        "GITHUB_RUN_ID": "123",
+        "RUNNER_TEMP": str(temporary),
+    }
+    with (
+        patch.dict(os.environ, environment),
+        patch.object(harness.platform, "system", return_value="Darwin"),
+        patch.object(harness, "local_account", return_value=("runner", home)),
+        patch.object(Path, "home", return_value=home),
+    ):
+        yield settings, harness.require_macos_runner(settings)
+
+
+def test_default_macos_refuses_before_any_profile_or_native_write(
     tmp_path: Path,
 ) -> None:
     settings = make_settings(tmp_path, "Darwin")
-    harness.seed_configuration(settings.layout)
-    with settings.layout.preferences.file.open("rb") as source:
-        before = plistlib.load(source)
     with (
-        patch.object(
-            harness,
-            "run",
-            side_effect=harness.HarnessError("Private native nonce missing"),
-        ) as run,
-        pytest.raises(harness.HarnessError, match="Private native nonce missing"),
+        patch.object(harness, "claim_profile") as claim,
+        patch.object(harness, "run") as run,
+        pytest.raises(harness.HarnessError, match="Local/default macOS"),
     ):
-        harness.verify_macos_preferences(settings)
-    assert run.call_count == 1
-    with settings.layout.preferences.file.open("rb") as source:
-        assert plistlib.load(source) == before
-    assert "mcp-score.nativeWriteNonce" not in before
+        harness.start(settings, tmp_path / "score.musicxml")
+    claim.assert_not_called()
+    run.assert_not_called()
+    assert not settings.layout.root.exists()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("RUNNER_ENVIRONMENT", "self-hosted"),
+        ("GITHUB_ACTIONS", "false"),
+        ("RUNNER_OS", "Linux"),
+        ("GITHUB_RUN_ID", "invalid"),
+        ("RUNNER_TEMP", "/tmp"),
+    ],
+)
+def test_macos_rejects_unverified_runner_metadata(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    with (
+        hosted_mac(tmp_path) as (settings, _),
+        patch.dict(os.environ, {key: value}),
+        pytest.raises(harness.HarnessError),
+    ):
+        harness.require_macos_runner(settings)
+
+
+def test_macos_requires_explicit_mode_even_on_hosted_runner(tmp_path: Path) -> None:
+    with (
+        hosted_mac(tmp_path) as (settings, _),
+        pytest.raises(harness.HarnessError, match="Local/default macOS"),
+    ):
+        harness.require_macos_runner(replace(settings, macos_runner_mode=False))
+
+
+def test_runner_account_and_owned_artifacts_are_separate(tmp_path: Path) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        assert not account.home.is_relative_to(settings.layout.root)
+        assert not settings.layout.root.is_relative_to(account.home)
+        environment = harness.child_environment(settings)
+        assert environment["HOME"] == os.environ["HOME"]
+        assert "CFFIXED_USER_HOME" not in environment
+        assert "__CFPREFERENCES_AVOID_DAEMON" not in environment
+        account.data_dir.mkdir(parents=True)
+        sentinel = account.data_dir / "native-account-data"
+        sentinel.write_text("left for runner disposal")
+        harness.clean(settings)
+        assert not settings.layout.root.exists()
+        assert sentinel.read_text() == "left for runner disposal"
+        with pytest.raises(harness.HarnessError, match="home"):
+            harness.claim_profile(harness.layout_for("Darwin", account.home))
+
+
+def test_runner_existing_session_and_fixture_restart_are_atomic_owned_moves(
+    tmp_path: Path,
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        source = account.data_dir / "session"
+        for fixture in ("first-start", "fixture-restart"):
+            source.mkdir(parents=True)
+            (source / "project").write_text(fixture)
+            harness.move_runner_session(settings, account)
+            assert not source.exists()
+        moves = json.loads(
+            (settings.layout.root / "runner-session-moves.json").read_text()
+        )
+        assert len(moves) == 2
+        assert [
+            Path(move["owned_backup"]).joinpath("project").read_text() for move in moves
+        ] == ["first-start", "fixture-restart"]
+        harness.clean(settings)
+        assert account.data_dir.exists()
+        assert all(not Path(move["owned_backup"]).exists() for move in moves)
+
+
+def test_runner_session_symlink_is_refused_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        account.data_dir.mkdir(parents=True)
+        target = tmp_path / "unrelated"
+        target.mkdir()
+        source = account.data_dir / "session"
+        source.symlink_to(target, target_is_directory=True)
+        with pytest.raises(harness.HarnessError, match="symlinked"):
+            harness.move_runner_session(settings, account)
+        assert source.is_symlink() and target.is_dir()
+
+
+def test_failed_runner_session_move_preserves_source(tmp_path: Path) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        source = account.data_dir / "session"
+        source.mkdir(parents=True)
+        sentinel = source / "project"
+        sentinel.write_text("keep")
+        with (
+            patch.object(Path, "rename", side_effect=OSError("cross-device")),
+            pytest.raises(harness.HarnessError, match="atomically"),
+        ):
+            harness.move_runner_session(settings, account)
+        assert sentinel.read_text() == "keep"
+        assert not (settings.layout.root / "runner-session-moves.json").exists()
+
+
+def test_runner_boundary_reports_native_mutation_without_preservation_claim(
+    tmp_path: Path,
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        baseline = tmp_path / "before.json"
+        baseline.write_text("{}")
+        report = tmp_path / "logs/boundary.json"
+        with (
+            patch.object(harness, "musescore_running", return_value=False),
+            patch.object(
+                harness,
+                "normal_profile_snapshot",
+                return_value={str(account.preferences_file): "changed"},
+            ),
+        ):
+            harness.verify_runner_account_boundary(settings, baseline, report)
+        result = json.loads(report.read_text())
+        assert result["isolation_boundary"] == "disposable-github-hosted-macos-account"
+        assert result["native_account_mutation_expected"] is True
+        assert result["per_process_private_profile_claim"] is False
+        assert result["owned_artifact_root_removed"] is True
+
+
+def test_runner_boundary_rejects_mutation_outside_account(tmp_path: Path) -> None:
+    with hosted_mac(tmp_path) as (settings, _):
+        baseline = tmp_path / "before.json"
+        baseline.write_text("{}")
+        with (
+            patch.object(harness, "musescore_running", return_value=False),
+            patch.object(
+                harness,
+                "normal_profile_snapshot",
+                return_value={str(tmp_path / "outside"): "changed"},
+            ),
+            pytest.raises(harness.HarnessError, match="escaped"),
+        ):
+            harness.verify_runner_account_boundary(
+                settings, baseline, tmp_path / "report.json"
+            )
+
+
+def test_hosted_mac_seeds_native_account_only_after_explicit_guard(
+    tmp_path: Path,
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        preferences = harness.startup_preferences(settings.layout)
+        with (
+            patch.object(harness, "startup_preferences", return_value=preferences),
+            patch.object(
+                harness,
+                "run",
+                return_value=MagicMock(stdout=preferences["mcp-score/profileNonce"]),
+            ) as run,
+        ):
+            harness.seed_macos_runner(settings, account)
+        commands = [call.args[0] for call in run.call_args_list]
+        assert commands[0][:3] == [
+            "defaults",
+            "write",
+            harness.MACOS_PREFERENCES_DOMAIN,
+        ]
+        assert commands[-1] == [
+            "defaults",
+            "read",
+            harness.MACOS_PREFERENCES_DOMAIN,
+            "mcp-score.profileNonce",
+        ]
+        assert (account.data_dir / "extensions/config.json").is_file()
+        assert not settings.layout.preferences.file.exists()
+
+
+def test_runner_data_root_symlink_is_refused(tmp_path: Path) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        account.data_dir.parent.mkdir(parents=True)
+        target = account.home / "elsewhere"
+        target.mkdir()
+        account.data_dir.symlink_to(target, target_is_directory=True)
+        with pytest.raises(harness.HarnessError, match="symlinked"):
+            harness.require_macos_runner(settings)
+        assert target.is_dir()
