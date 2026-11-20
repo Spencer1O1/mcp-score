@@ -42,6 +42,7 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         # manipulation
         "add_live_note",
         "set_live_note_pitch",
+        "set_live_event_duration",
         "add_live_rehearsal_mark",
         "add_live_chord_symbol",
         "add_live_dynamic",
