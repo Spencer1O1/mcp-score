@@ -56,6 +56,8 @@ class PassageNote(Result):
     """Concert tonal pitch class (MuseScore tpc1)."""
     name: str
     """Concert spelling and octave, for example C#4 or Db4."""
+    written_tpc: int | None = None
+    """Written TPC (tpc2), without octave; null on older plugins."""
     displayed_tpc: int
     """TPC in the current concert/transposed display mode; not a MIDI pitch."""
 

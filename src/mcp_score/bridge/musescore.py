@@ -13,7 +13,7 @@ from importlib.metadata import version
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
-from pydantic.alias_generators import to_snake
+from pydantic.alias_generators import to_camel, to_snake
 
 from mcp_score.bridge.base import BridgeError
 from mcp_score.bridge.capabilities import (
@@ -22,6 +22,7 @@ from mcp_score.bridge.capabilities import (
     PluginCapabilities,
 )
 from mcp_score.bridge.passage import Passage
+from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -70,6 +71,7 @@ class MuseScoreCommand(StrEnum):
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
+    SET_NOTE_PITCH = "setNotePitch"
     ADD_REHEARSAL_MARK = "addRehearsalMark"
     ADD_CHORD_SYMBOL = "addChordSymbol"
     ADD_DYNAMIC = "addDynamic"
@@ -284,6 +286,32 @@ class MuseScoreBridge(WebSocketBridge):
 
     # ── Writing ─────────────────────────────────────────────────────
 
+    async def set_note_pitch(
+        self,
+        measure: int,
+        staff: int,
+        voice: int,
+        offset: Duration,
+        note_index: int,
+        pitch: int,
+        tpc: int,
+        expected: ExpectedChord,
+    ) -> PitchEdit:
+        return await self._run(
+            PitchEdit,
+            MuseScoreCommand.SET_NOTE_PITCH,
+            {
+                "measure": measure,
+                "staff": staff,
+                "voice": voice,
+                "offset": offset.model_dump(),
+                "noteIndex": note_index,
+                "pitch": pitch,
+                "tpc": tpc,
+                "expected": _camel_case_keys(expected.model_dump()),
+            },
+        )
+
     async def add_note(
         self, pitch: int, duration: Duration, advance_cursor: bool = True
     ) -> NoteAdded:
@@ -368,4 +396,14 @@ def _snake_case_keys(value: object) -> object:
         return {to_snake(str(key)): _snake_case_keys(item) for key, item in entries}
     if isinstance(value, list):
         return [_snake_case_keys(item) for item in cast("list[object]", value)]
+    return value
+
+
+def _camel_case_keys(value: object) -> object:
+    """Convert typed snapshot fields to the plugin's wire naming convention."""
+    if isinstance(value, dict):
+        entries = cast("dict[object, object]", value).items()
+        return {to_camel(str(key)): _camel_case_keys(item) for key, item in entries}
+    if isinstance(value, list):
+        return [_camel_case_keys(item) for item in cast("list[object]", value)]
     return value

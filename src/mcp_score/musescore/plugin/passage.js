@@ -19,7 +19,8 @@ var unsupportedNotation = [
     "effective instrument, clef, key and tempo context",
     "displayed measure numbering and persistent event identifiers",
     "measure-attached elements outside segments",
-    "system annotations without a staff assignment"
+    "system annotations without a staff assignment",
+    "microtonal accidental cent offsets and playback tuning"
 ];
 
 function integer(value) {
@@ -121,6 +122,7 @@ function describeEvent(plugin, element, staff, voice, tick, measureTick) {
             notes.push({
                 pitch: note.pitch,
                 tpc: note.tpc1,
+                writtenTpc: note.tpc2,
                 name: concertName(note.pitch, note.tpc1),
                 displayedTpc: note.tpc
             });
