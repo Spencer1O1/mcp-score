@@ -22,7 +22,11 @@ from mcp_score.bridge.capabilities import (
     PluginCapabilities,
 )
 from mcp_score.bridge.current_selection import CurrentSelection
-from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
+from mcp_score.bridge.duration_edit import (
+    DurationEdit,
+    DurationPolicy,
+    ExpectedDurationEvent,
+)
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
 from mcp_score.bridge.receipts import (
@@ -84,6 +88,7 @@ class MuseScoreCommand(StrEnum):
     ADD_NOTE = "addNote"
     SET_NOTE_PITCH = "setNotePitch"
     SET_EVENT_DURATION = "setEventDuration"
+    EXTEND_EVENT_DURATION = "extendEventDuration"
     ADD_REHEARSAL_MARK = "addRehearsalMark"
     ADD_CHORD_SYMBOL = "addChordSymbol"
     ADD_DYNAMIC = "addDynamic"
@@ -425,17 +430,20 @@ class MuseScoreBridge(WebSocketBridge):
         offset: Duration,
         duration: Duration,
         expected: list[ExpectedDurationEvent],
+        policy: DurationPolicy = "shorten_fill_rest",
     ) -> DurationEdit:
         return await self._run(
             DurationEdit,
-            MuseScoreCommand.SET_EVENT_DURATION,
+            MuseScoreCommand.EXTEND_EVENT_DURATION
+            if policy == "extend_into_rests"
+            else MuseScoreCommand.SET_EVENT_DURATION,
             {
                 "measure": measure,
                 "staff": staff,
                 "voice": voice,
                 "offset": offset.model_dump(),
                 "duration": duration.model_dump(),
-                "policy": "shorten_fill_rest",
+                "policy": policy,
                 "expected": [
                     _camel_case_keys(event.model_dump()) for event in expected
                 ],

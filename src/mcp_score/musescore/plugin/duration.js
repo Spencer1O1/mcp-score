@@ -1,4 +1,4 @@
-// Native changeCRlen only: shorten one ordinary chord and fill released time.
+// Native changeCRlen only: shorten, or extend into prevalidated plain rests.
 .pragma library
 .import "constants.js" as Constants
 .import "passage.js" as Passage
@@ -9,7 +9,7 @@ var limitations = [
     "whole target-voice measure snapshot; no score identity or global revision",
     "identical target contents in another score cannot be distinguished",
     "MuseScore 4.7+ in major version 4 only; earlier native metadata is insufficient",
-    "shorten_fill_rest only; no extension, bar crossing or insertion fallback",
+    "shortening or exact-boundary extension into plain rests only; no bar crossing or insertion fallback",
     "target attachments, beams, ties, tuplets, grace notes and intersecting/unknown spanners are unsupported",
     "UI selection and layout may change; logical cursor is untouched",
     "verification covers exposed measure events, not every engraving property"
@@ -89,6 +89,69 @@ function eligible(plugin, chord) {
     }
     return true;
 }
+// Missing native metadata is a rejection, never evidence that a rest is plain.
+function plainRest(plugin, rest, track) {
+    var length = ticks(rest.actualDuration);
+    return rest.type === plugin.Element.REST && rest.track === track
+        && canonical(length) && ticks(rest.duration) === length
+        && rest.tuplet === null && rest.topTuplet === null
+        && rest.beam === null && rest.staffMove === 0
+        && rest.gap === false && rest.visible === true && rest.generated === false
+        && rest.isFullMeasureRest === false
+        && empty(rest.elements) && empty(rest.lyrics);
+}
+// makeGap may delete covered elements and anchored annotations or fill silent
+// gaps. Inspect the actual native elements, not just their serialized events.
+function extensionCoverage(plugin, params, oldEnd, newEnd) {
+    var measure = plugin.curScore.firstMeasure;
+    for (var ordinal = 1; measure && ordinal < params.measure; ordinal++) {
+        measure = measure.nextMeasure;
+    }
+    if (!measure) throw new Error("Native target measure is unavailable");
+    var track = params.staff * Constants.voicesPerStaff + params.voice;
+    var rests = [];
+    var segment = measure.firstSegment;
+    while (segment) {
+        var tick = segment.tick;
+        if (!Pitch.integer(tick)) throw new Error("Unknown native segment position");
+        if (tick >= oldEnd && tick < newEnd) {
+            var annotations = segment.annotations;
+            if (!annotations || !Pitch.integer(annotations.length)) {
+                throw new Error("Native annotation metadata is unavailable");
+            }
+            for (var annotation = 0; annotation < annotations.length; annotation++) {
+                var annotationTrack = annotations[annotation].track;
+                if (!Pitch.integer(annotationTrack) || annotationTrack < 0 || annotationTrack === track) {
+                    throw new Error("The consumed interval contains a target or unassigned annotation");
+                }
+            }
+        }
+        var element = segment.elementAt(track);
+        if (element) {
+            var rhythmic = element.type === plugin.Element.CHORD || element.type === plugin.Element.REST;
+            if (rhythmic) {
+                var length = ticks(element.actualDuration);
+                if (!length) throw new Error("Unknown native rhythmic duration");
+                if (tick < newEnd && tick + length > oldEnd) {
+                    if (tick < oldEnd || tick + length > newEnd || !plainRest(plugin, element, track)) {
+                        throw new Error("Extension requires complete plain rests ending at the requested boundary");
+                    }
+                    rests.push({tick: tick, length: length});
+                }
+            } else if (tick >= oldEnd && tick < newEnd) {
+                throw new Error("The consumed interval contains an unsupported native element");
+            }
+        }
+        segment = segment.nextInMeasure;
+    }
+    rests.sort(function(left, right) { return left.tick - right.tick; });
+    var covered = oldEnd;
+    for (var index = 0; index < rests.length; index++) {
+        if (rests[index].tick !== covered) throw new Error("Rest coverage contains a gap or overlap");
+        covered += rests[index].length;
+    }
+    if (covered !== newEnd) throw new Error("Rest coverage does not reach the requested boundary");
+}
 function verify(before, after, params, onset, oldTicks, newTicks) {
     var targetBefore = before.events.filter(function(event) {
         return event.staff === params.staff && event.voice === params.voice
@@ -103,11 +166,12 @@ function verify(before, after, params, onset, oldTicks, newTicks) {
     expectedTarget.duration = Passage.fraction(newTicks, Constants.ticksPerWholeNote);
     expectedTarget.actualDuration = expectedTarget.duration;
     if (key(expectedTarget) !== key(targetAfter[0])) return false;
+    var affectedEnd = onset + Math.max(oldTicks, newTicks);
     var fill = after.events.filter(function(event) {
         return event.staff === params.staff && event.voice === params.voice
             && event.tick >= onset + newTicks && event.tick < onset + oldTicks;
     });
-    var covered = onset + newTicks;
+    var covered = onset + Math.min(newTicks, oldTicks);
     for (var index = 0; index < fill.length; index++) {
         var rest = fill[index];
         var length = ticks(rest.actualDuration);
@@ -117,12 +181,12 @@ function verify(before, after, params, onset, oldTicks, newTicks) {
     }
     if (covered !== onset + oldTicks) return false;
     var inside = voiceEvents(after.events,params).filter(function(event) {
-        return event.kind !== "other" && event.tick >= onset && event.tick < onset + oldTicks;
+        return event.kind !== "other" && event.tick >= onset && event.tick < affectedEnd;
     });
     if (inside.length !== fill.length + 1) return false;
     function outside(event) {
         return event.kind === "other" || !(event.staff === params.staff && event.voice === params.voice
-            && event.tick >= onset && event.tick < onset + oldTicks);
+            && event.tick >= onset && event.tick < affectedEnd);
     }
     return keys(before.events.filter(outside)) === keys(after.events.filter(outside))
         && JSON.stringify([before.tick,before.timeSignature,before.actualDuration])
@@ -135,7 +199,7 @@ function success(params, before, after, status) {
         selectionStatus:status === "unchanged" ? "unchanged" : "not_preserved",
         limitations:limitations.slice()}};
 }
-function setEventDuration(plugin, params) {
+function editDuration(plugin, params, policy) {
     var scoreError = Score.requireScore(plugin);
     if (scoreError) return failure(params,"target_unavailable",scoreError.error,"not_applied");
     if (plugin.mscoreMajorVersion !== 4 || !Pitch.integer(plugin.mscoreMinorVersion)
@@ -147,7 +211,7 @@ function setEventDuration(plugin, params) {
     if (!Pitch.integer(params.measure) || params.measure < 1 || !Pitch.integer(params.staff)
             || params.staff < 0 || params.staff >= plugin.curScore.nstaves
             || !Pitch.integer(params.voice) || params.voice < 0 || params.voice > 3
-            || params.policy !== "shorten_fill_rest" || !Array.isArray(params.expected)
+            || (params.policy !== undefined && params.policy !== policy) || !Array.isArray(params.expected)
             || params.expected.length === 0 || ticks(params.offset) === null
             || !canonical(ticks(params.duration))) {
         return failure(params,"invalid_target","Invalid position, duration, policy or snapshot","not_applied");
@@ -166,18 +230,26 @@ function setEventDuration(plugin, params) {
         var oldTicks = ticks(resolved.chord.actualDuration);
         var newTicks = ticks(params.duration);
         if (!canonical(oldTicks) || ticks(resolved.chord.duration) !== oldTicks
-                || newTicks > oldTicks || resolved.tick + oldTicks > before.tick + ticks(before.actualDuration)
+                || (policy === "shorten_fill_rest" && newTicks > oldTicks)
+                || (policy === "extend_into_rests" && newTicks < oldTicks)
+                || resolved.tick + Math.max(oldTicks, newTicks) > before.tick + ticks(before.actualDuration)
                 || !eligible(plugin,resolved.chord)) {
             return failure(params,"unsupported_target",
-                "Only unadorned ordinary unbeamed chords may shorten within a bar",
+                "Only unadorned ordinary unbeamed chords may change duration within a bar under the selected policy",
                 "not_applied");
         }
         try {
-            beforeSpanners = spanners(plugin,resolved.tick,resolved.tick + oldTicks);
+            beforeSpanners = spanners(plugin,resolved.tick,resolved.tick + Math.max(oldTicks, newTicks));
         } catch (spanError) {
             return failure(params,"unsupported_spanner",String(spanError),"not_applied");
         }
-        // No other event in the target voice may occupy the released interval.
+        if (newTicks > oldTicks) {
+            try { extensionCoverage(plugin, params, resolved.tick + oldTicks, resolved.tick + newTicks); }
+            catch (coverageError) {
+                return failure(params,"unsupported_rest_coverage",String(coverageError),"not_applied");
+            }
+        }
+        // Preserve the original chord interval, including its annotations.
         if (voiceEvents(before.events,params).some(function(event) {
             return event.tick > resolved.tick && event.tick < resolved.tick + oldTicks;
         })) return failure(params,"unsupported_target","Affected interval contains other events","not_applied");
@@ -215,10 +287,24 @@ function setEventDuration(plugin, params) {
         try {
             if (started) { started = false; score.endCmd(true); cancelled = true; }
             actual = read(plugin,params);
+            if (cancelled && newTicks > oldTicks) {
+                // Plain-rest eligibility is not fully represented in passage
+                // events. Recheck it on fresh native wrappers after rollback.
+                extensionCoverage(plugin, params, resolved.tick + oldTicks, resolved.tick + newTicks);
+            }
             if (cancelled && measureKey(before) === measureKey(actual)
                     && spanners(plugin) === beforeSpanners) status = "rolled_back";
         } catch (rollbackError) { if (!committed) status = "unknown"; }
         return failure(params,"verification_failed",String(error),status,
                        {before:before.events,actual:actual ? actual.events : null});
     }
+}
+
+// Separate advertised commands let clients reject an older shortening-only
+// plugin before sending an extension request. Command identity fixes policy.
+function setEventDuration(plugin, params) {
+    return editDuration(plugin, params, "shorten_fill_rest");
+}
+function extendEventDuration(plugin, params) {
+    return editDuration(plugin, params, "extend_into_rests");
 }

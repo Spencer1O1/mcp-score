@@ -378,12 +378,15 @@ rejected. Written octave is not returned. Not available with Dorico.
 
 ### `set_live_event_duration`
 
-Shorten an ordinary live chord and fill its released time with rests.
+Change an ordinary live chord's duration under an explicit rest policy.
 
 Pass ALL events from a fresh get_measure_content read filtered to the explicit staff
 and voice as expected. This complete voice-measure snapshot is checked inside
-the synchronous native handler before any mutation. The only policy is
-shorten_fill_rest: no extension or bar crossing. Only undotted whole through
+the synchronous native handler before any mutation. Default shorten_fill_rest
+shortens and fills released time. Explicit extend_into_rests lengthens only
+through complete contiguous plain rests in the same voice and bar, ending
+exactly at a rest boundary. Notes, gaps, partial rests, attached/hidden/cross-staff
+rests and unknown eligibility reject before mutation. Only undotted whole through
 32nd durations are accepted. MuseScore 4.7+ (major version 4) is required for
 native duration rewriting and spanner inspection; older versions reject.
 
@@ -395,15 +398,19 @@ checking neighboring events and spelling, and create one undo step. No-op
 requests create none. Selection/layout may change; logical cursor is untouched.
 This snapshot does not identify a score instance or global revision and cannot
 detect switching to identical contents. Not available with Dorico.
+Extension requires the separately advertised extendEventDuration command;
+an older shortening-only plugin rejects before send. Neither duration policy
+supports mutation receipts or sequence execution; transport loss is not replayed.
 
-| Parameter  | Type                          | Default    | Description                                                        |
-| ---------- | ----------------------------- | ---------- | ------------------------------------------------------------------ |
-| `measure`  | `int`                         | (required) | Ordinal measure (1-indexed).                                       |
-| `staff`    | `int`                         | (required) | Explicit staff index (0-indexed).                                  |
-| `voice`    | `int`                         | (required) | Explicit voice index (0-3).                                        |
-| `offset`   | `WholeNoteFraction`           | (required) | Exact chord onset within the measure, in whole notes.              |
-| `duration` | `WholeNoteFraction`           | (required) | New shorter or equal undotted binary whole-note duration.          |
-| `expected` | `list[ExpectedDurationEvent]` | (required) | Complete fresh target voice measure events, including annotations. |
+| Parameter  | Type                                         | Default               | Description                                                        |
+| ---------- | -------------------------------------------- | --------------------- | ------------------------------------------------------------------ |
+| `measure`  | `int`                                        | (required)            | Ordinal measure (1-indexed).                                       |
+| `staff`    | `int`                                        | (required)            | Explicit staff index (0-indexed).                                  |
+| `voice`    | `int`                                        | (required)            | Explicit voice index (0-3).                                        |
+| `offset`   | `WholeNoteFraction`                          | (required)            | Exact chord onset within the measure, in whole notes.              |
+| `duration` | `WholeNoteFraction`                          | (required)            | New undotted binary whole-note duration, consistent with policy.   |
+| `expected` | `list[ExpectedDurationEvent]`                | (required)            | Complete fresh target voice measure events, including annotations. |
+| `policy`   | `"shorten_fill_rest" \| "extend_into_rests"` | `"shorten_fill_rest"` | shorten_fill_rest (default) or explicit extend_into_rests.         |
 
 **Returns** `DurationEdit`: Actual before/after events across all tracks of the edited measure.
 

@@ -493,12 +493,17 @@ execution. Normal raw/legacy mutations remain outside this duplicate guarantee.
 | ------- | ------ | ------------------------------------------------------------- |
 | `undo`  | none   | Undo the last action; reports the cursor position afterwards. |
 
-### Guarded duration shortening
+### Guarded duration changes
 
-`setEventDuration` is a top-level mutation (never a sequence action or a replay-safe
-command). Parameters are `{measure, staff, voice, offset, duration, policy,
+`set_live_event_duration` defaults to `policy: shorten_fill_rest`. It sends the
+`setEventDuration` command. Explicit `policy: extend_into_rests` sends the
+separately advertised `extendEventDuration` command, so an older shortening-only
+plugin is rejected before sending an extension. Both are top-level mutations,
+never sequence actions, receipt-protected mutations or replay-safe commands.
+Parameters are `{measure, staff, voice, offset, duration, policy,
 expected}`. Measures are ordinal and 1-indexed; staff/voice are zero-based and
-fractions use whole notes. `policy` must be `shorten_fill_rest`. `expected` must
+fractions use whole notes. Wire command identity fixes the policy; contradictory
+policy values reject. `expected` must
 contain **every event** in a fresh complete read of that measure filtered to the
 explicit staff and voice, including annotations. Neighbor pitch/spelling,
 rhythm, lyrics and articulations in that voice are checked atomically before
@@ -506,36 +511,55 @@ opening the undo command. Snapshot scope is that voice measure, not a score
 instance or application revision; identical contents in another score remain
 indistinguishable.
 
-This first duration slice uses the actual native `DurationElement.duration`
+Both policies use the actual native `DurationElement.duration`
 setter, which calls `Score::changeCRlen`; it never deletes/reinserts a note as a
 fallback. The setter was added in 4.6, but this operation requires actual
 **MuseScore 4.7+ in major version 4** because complete score-spanner enumeration
 was added in 4.7. The handler checks native application version and metadata,
 not the bridge package version. 4.4 and 4.6 reject before any undo command.
 
-Only ordinary pitched chords with equal notated/elapsed durations may shorten
+Only ordinary pitched chords with equal notated/elapsed durations may change
 within one measure. Original and replacement durations must be undotted whole,
 half, quarter, eighth, 16th or 32nd notes. Equal durations return `unchanged`
-without history; larger durations reject. Target ties, tuplets, grace notes,
+without history. The shortening policy rejects larger durations; the extension
+policy rejects smaller durations. Target ties, tuplets, grace notes,
 beams, tremolos, arpeggios, cross-staffing, drum/tab staves, microtonality,
 lyrics, articulations and other attached child elements reject. Missing native
 eligibility metadata also rejects. This prevents attachment loss rather than
 claiming that arbitrary notation survives native rewriting.
 
+Extension consumes only complete, contiguous, plain rests in the target voice
+from the old end through the requested new end, within the same bar. The new
+end must already be a rest boundary; partial-rest decomposition is unsupported.
+Actual native segment elements are checked before opening a command, including
+overlaps, gaps, following chords and unknown elements. Each consumed rest must
+have matching undotted notated/elapsed durations, no tuplets, beam, cross-staff
+move, lyrics or attached elements, and known visible/non-generated/non-gap,
+non-full-measure status. Missing eligibility metadata rejects. Target or
+unassigned segment annotations in the consumed interval reject as well. Chord
+onset clefs/signatures/annotations outside the consumed interval remain subject
+to unchanged read-back verification. Native lengthening uses `makeGap`, which
+can otherwise delete notation; it is never called speculatively over occupied
+or unknown time.
+
 Spanners with unknown time/track metadata reject. A spanner whose closed time
-interval intersects the original chord interval rejects, conservatively across
+interval intersects the larger of the original and requested chord intervals
+rejects, conservatively across
 all staves. A known distant spanner is allowed; all enumerated spanner type,
 start, length, tracks and anchor values must survive unchanged. Native
 `spannerTicks` is a **length**, despite the API header's end-tick description.
 
 Read-back traverses the entire measure and re-resolves events after native
-rewriting. It verifies the shortened chord's pitch/spelling, contiguous rest
-coverage through the original end, and unchanged exposed events on every track
+rewriting. It verifies the chord's preserved notes/spelling and requested
+duration, contiguous rest fill when shortening or exact removal of the consumed
+rests when extending, and unchanged exposed events on every track
 (including neighboring lyric/articulation metadata). Responses return actual
 all-track `before`/`after` events and `verified: true` only after checks both
 inside the undo scope and after commit. This verifies exposed event data, not
 every engraving property. Native cancellation is attempted only while this
 operation's undo scope is known open; `rolled_back` requires a matching reread.
+For extension, native plain-rest eligibility is checked again on the restored
+coverage; matching passage events alone would not prove those flags restored.
 A failed verification after commit reports `applied_unverified`; no global undo
 is attempted. Inspect failed outcomes before retrying.
 
@@ -548,8 +572,9 @@ Native API evidence:
 [duration wrapper and setter](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/elements.cpp),
 [native shortening implementation](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/editing/cmd.cpp),
 [spanner property semantics](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/dom/spanner.cpp).
-The isolated native fixture checks shortening/rest fill, chord/transposing
-spelling, untouched neighbors, rejection and undo; older-version jobs exercise
+The same isolated native fixture checks shortening/rest fill, extension into
+single/multiple rests, chord/transposing spelling, untouched neighbors, unsafe
+rest/occupied/boundary rejection and undo; older-version jobs exercise
 explicit rejection rather than skipping their duration phase.
 
 ### Batch operations

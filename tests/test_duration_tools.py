@@ -10,7 +10,7 @@ import pytest
 from websockets.exceptions import ConnectionClosed
 
 from mcp_score.bridge import BridgeError
-from mcp_score.bridge.duration_edit import ExpectedDurationEvent
+from mcp_score.bridge.duration_edit import DurationPolicy, ExpectedDurationEvent
 from mcp_score.bridge.results import Duration
 from mcp_score.server import create_server
 from mcp_score.tools import ToolError
@@ -67,6 +67,9 @@ def _arguments() -> dict:
         ("voice", "0"),
         ("duration", {"numerator": True, "denominator": 8}),
         ("offset", {"numerator": 0, "denominator": "1"}),
+        ("policy", "overwrite"),
+        ("policy", None),
+        ("policy", True),
     ],
 )
 async def test_mcp_rejects_coercion_before_bridge(
@@ -87,13 +90,22 @@ async def test_mcp_rejects_coercion_before_bridge(
 
 @pytest.mark.anyio()
 @pytest.mark.parametrize("case", ["missing", "lost", "sequence"])
+@pytest.mark.parametrize(
+    ("policy", "command"),
+    [
+        ("shorten_fill_rest", "setEventDuration"),
+        ("extend_into_rests", "extendEventDuration"),
+    ],
+)
 async def test_duration_requires_capability_and_never_replays_or_batches(
     registry: BridgeRegistry,
     case: str,
+    policy: DurationPolicy,
+    command: str,
 ) -> None:
     handshake = deepcopy(MUSESCORE_HANDSHAKE)
     if case == "missing":
-        handshake["result"]["commands"].remove("setEventDuration")
+        handshake["result"]["commands"].remove(command)
     replies = [handshake]
     if case == "lost":
         replies.append(ConnectionClosed(None, None))
@@ -103,7 +115,7 @@ async def test_duration_requires_capability_and_never_replays_or_batches(
     bridge = registry.musescore
     with patch(WEBSOCKETS_CONNECT, connect), pytest.raises(BridgeError) as caught:
         if case == "sequence":
-            await bridge.process_sequence([{"action": "setEventDuration"}])
+            await bridge.process_sequence([{"action": command}])
         else:
             await bridge.set_event_duration(
                 1,
@@ -112,12 +124,11 @@ async def test_duration_requires_capability_and_never_replays_or_batches(
                 Duration(numerator=0, denominator=1),
                 Duration(numerator=1, denominator=8),
                 [ExpectedDurationEvent.model_validate(args["expected"][0])],
+                policy,
             )
     commands = [payload["command"] for payload in sent_payloads(connection)]
     assert commands == (
-        ["getCapabilities", "setEventDuration"]
-        if case == "lost"
-        else ["getCapabilities"]
+        ["getCapabilities", command] if case == "lost" else ["getCapabilities"]
     )
     if case == "lost":
         assert caught.value.details["code"] == "outcome_unknown"
@@ -125,11 +136,16 @@ async def test_duration_requires_capability_and_never_replays_or_batches(
 
 
 @pytest.mark.anyio()
+@pytest.mark.parametrize("policy", [None, "extend_into_rests"])
 async def test_tool_sends_explicit_snapshot_in_one_command_and_returns_native_readback(
     registry: BridgeRegistry,
     context: ScoreContext,
+    policy: str | None,
 ) -> None:
     arguments = _arguments()
+    if policy:
+        arguments["policy"] = policy
+        arguments["duration"] = {"numerator": 1, "denominator": 2}
     events = arguments["expected"]
     reply = {
         "result": {
@@ -156,8 +172,8 @@ async def test_tool_sends_explicit_snapshot_in_one_command_and_returns_native_re
     payloads = sent_payloads(connection)
     assert [payload["command"] for payload in payloads] == [
         "getCapabilities",
-        "setEventDuration",
+        "extendEventDuration" if policy else "setEventDuration",
     ]
-    assert payloads[-1]["params"]["policy"] == "shorten_fill_rest"
+    assert payloads[-1]["params"]["policy"] == (policy or "shorten_fill_rest")
     assert payloads[-1]["params"]["expected"][0]["notes"][0]["writtenTpc"] == 14
     assert payloads[-1]["params"]["offset"] == arguments["offset"]

@@ -91,6 +91,7 @@ MUSESCORE_HANDSHAKE: dict[str, Any] = {
                 MuseScoreCommand.READ_MUTATION_RECEIPT,
                 MuseScoreCommand.SET_NOTE_PITCH,
                 MuseScoreCommand.SET_EVENT_DURATION,
+                MuseScoreCommand.EXTEND_EVENT_DURATION,
                 MuseScoreCommand.UNDO,
                 MuseScoreCommand.PROCESS_SEQUENCE,
             }

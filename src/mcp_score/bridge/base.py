@@ -18,7 +18,11 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from mcp_score.bridge.current_selection import CurrentSelection
-    from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
+    from mcp_score.bridge.duration_edit import (
+        DurationEdit,
+        DurationPolicy,
+        ExpectedDurationEvent,
+    )
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
     from mcp_score.bridge.receipts import (
@@ -191,8 +195,9 @@ class ScoreBridge(ABC):
         offset: Duration,
         duration: Duration,
         expected: list[ExpectedDurationEvent],
+        policy: DurationPolicy = "shorten_fill_rest",
     ) -> DurationEdit:
-        """Shorten one guarded chord using native duration rewriting."""
+        """Change one guarded chord using an explicit native duration policy."""
         raise BridgeError(
             f"{self.application_name} cannot perform guarded duration edits."
         )
