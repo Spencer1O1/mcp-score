@@ -298,7 +298,7 @@ async def _scenario(session: ClientSession) -> None:
         session, SelectionProperties, "get_selection_properties"
     )
     submitted = False
-    undone = False
+    undo_attempted = False
     stale_identity: dict[str, Any] | None = None
     try:
         submitted = True
@@ -332,11 +332,13 @@ async def _scenario(session: ClientSession) -> None:
         assert rejected.original_reply.get("code") == "stale_target"
         assert rejected.original_reply.get("mutation_status") == "not_applied"
         assert await _read_preserving_state(session) == expected_after
+        # Undo is unreceipted. Once sent, even an error/timeout cannot authorize
+        # another undo from the historical pitch receipt or matching contents.
+        undo_attempted = True
         undo = await session.call_tool(
             "undo_last_action", {}, read_timeout_seconds=_CALL_TIMEOUT
         )
         assert not undo.is_error, undo.content
-        undone = True
         assert await _read_preserving_state(session) == baseline
         historical = await _call(
             session, MutationReceipt, "execute_mutation_once", request
@@ -345,7 +347,7 @@ async def _scenario(session: ClientSession) -> None:
         assert await _read_preserving_state(session) == baseline
     finally:
         try:
-            if submitted and not undone:
+            if submitted and not undo_attempted:
                 # SDK/schema failures can hide an applied reply. Resolve the
                 # PUBLIC receipt, without replaying; unknown grants no undo authority.
                 retained = await _call(
@@ -381,6 +383,7 @@ async def _scenario(session: ClientSession) -> None:
                         raise RuntimeError(
                             "Cleanup refused: unexpected or intervening edit; no undo"
                         )
+                    undo_attempted = True
                     cleanup = await session.call_tool(
                         "undo_last_action", {}, read_timeout_seconds=_CALL_TIMEOUT
                     )
