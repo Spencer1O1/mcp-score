@@ -181,8 +181,18 @@ async def test_native_lyrics_preserve_verses_syllables_placement_and_staff_voice
         if event.staff == 1 and event.kind == "chord"
     )
     assert bass.lyrics is not None and bass.lyrics[0].text == "bass"
-    no_lyrics = next(event for event in passage.measures[0].events if event.staff == 2)
+    no_lyrics = next(
+        event
+        for event in passage.measures[0].events
+        if event.staff == 2 and event.kind == "rest"
+    )
     assert no_lyrics.lyrics == []
+    nonrhythmic = [
+        event
+        for event in passage.measures[0].events
+        if event.staff == 2 and event.kind == "other"
+    ]
+    assert nonrhythmic and all(event.lyrics is None for event in nonrhythmic)
     unavailable_articulations = any(event.articulations is None for event in melody)
     assert any("chord articulations" in detail for detail in passage.unsupported) == (
         unavailable_articulations
