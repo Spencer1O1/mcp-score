@@ -111,7 +111,7 @@ class TestScoreTool:
     @pytest.mark.anyio()
     async def test_bridge_error_becomes_tool_error_with_same_message(self) -> None:
         # Arrange
-        refusal = BridgeError("Measure 99 out of range", measure=99)
+        refusal = BridgeError("Measure 99 out of range")
 
         @score_tool
         async def refused() -> CursorPosition:

@@ -162,7 +162,7 @@ class TestCommandPreflight:
 
     @pytest.mark.anyio()
     @pytest.mark.parametrize("incompatible", [False, True])
-    async def test_reconnect_never_sends_mutation_to_unsupported_plugin(
+    async def test_reconnect_rechecks_safe_read_capability_before_replay(
         self, incompatible: bool
     ) -> None:
         dropped = fake_connection(MUSESCORE_HANDSHAKE, ConnectionClosed(None, None))
@@ -179,10 +179,10 @@ class TestCommandPreflight:
             patch(WEBSOCKETS_CONNECT, AsyncMock(side_effect=[dropped, replacement])),
             pytest.raises(BridgeError),
         ):
-            await bridge.send_command("addNote", {"pitch": 60})
+            await bridge.send_command("getScore")
         assert sent_payloads(dropped) == [
             HANDSHAKE_REQUEST,
-            {"command": "addNote", "params": {"pitch": 60}},
+            {"command": "getScore"},
         ]
         assert sent_payloads(replacement) == [HANDSHAKE_REQUEST]
         if incompatible:

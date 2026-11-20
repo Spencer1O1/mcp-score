@@ -13,6 +13,7 @@ an edit.
 from __future__ import annotations
 
 import functools
+import json
 from typing import TYPE_CHECKING, Protocol
 
 from mcp.server.mcpserver.exceptions import ToolError
@@ -60,7 +61,9 @@ def score_tool[**P, R](tool: Tool[P, R]) -> Tool[P, R]:
     """Report an application's refusal (:class:`BridgeError`) as a tool error.
 
     The wrapped function keeps its signature, which is what the MCP server
-    reads to describe the tool's parameters and result to the model.
+    reads to describe the tool's parameters and result to the model. Errors
+    with details retain a JSON envelope in ToolError's text because the SDK
+    does not expose structured metadata on that exception.
     """
 
     @functools.wraps(tool)
@@ -68,7 +71,12 @@ def score_tool[**P, R](tool: Tool[P, R]) -> Tool[P, R]:
         try:
             return await tool(*args, **kwargs)
         except BridgeError as error:
-            raise ToolError(error.message) from error
+            message = (
+                json.dumps({"error": error.message, "details": error.details})
+                if error.details
+                else error.message
+            )
+            raise ToolError(message) from error
 
     return deliver
 

@@ -173,6 +173,16 @@ class RemoteControlBridge(WebSocketBridge):
         """Send a protocol-level message such as ``getstatus``."""
         return await self._exchange({"message": message_type, **(fields or {})})
 
+    def _is_replay_safe(self, payload: dict[str, Any]) -> bool:
+        return payload.get("message") in {
+            "getappinfo",
+            "getcommands",
+            "getstatus",
+            "getflows",
+            "getlayouts",
+            "getproperties",
+        }
+
     async def _exchange(self, payload: dict[str, Any]) -> CommandResult:
         reply = await super()._exchange(payload)
         if reply.get("code") == RESPONSE_ERROR:

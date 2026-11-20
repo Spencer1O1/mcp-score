@@ -2,9 +2,9 @@
 
 ``WebSocketTransport`` owns one connection and exchanges JSON messages over
 it. ``WebSocketBridge`` builds the bridge behaviour on top: lazy connect,
-one reconnect attempt when the connection drops, and hooks for a protocol
-handshake, so concrete bridges only describe how their application frames
-commands.
+one reconnect attempt for allowlisted read-only requests, and hooks for a
+protocol handshake. Mutations and unknown requests are never replayed after
+an uncertain exchange.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 import websockets
 from websockets.exceptions import WebSocketException
@@ -47,7 +48,11 @@ _CONNECTION_FAILURES: tuple[type[Exception], ...] = (
 
 
 class TransportError(Exception):
-    """The connection could not be opened, or an exchange did not complete."""
+    """A transport failure, with whether a request could have reached the peer."""
+
+    def __init__(self, message: str, *, may_have_been_sent: bool = False) -> None:
+        super().__init__(message)
+        self.may_have_been_sent = may_have_been_sent
 
 
 class WebSocketTransport:
@@ -110,16 +115,24 @@ class WebSocketTransport:
                 connection.recv(), timeout=self.receive_timeout
             )
         except _CONNECTION_FAILURES as exception:
-            raise TransportError(f"exchange failed: {exception}") from None
+            raise TransportError(
+                f"exchange failed: {exception}", may_have_been_sent=True
+            ) from None
         logger.debug("<- %s: %s", self.uri, reply)
         if not isinstance(reply, str):
-            raise TransportError("received a binary message, expected JSON text")
+            raise TransportError(
+                "received a binary message, expected JSON text", may_have_been_sent=True
+            )
         try:
             decoded: object = json.loads(reply)
         except json.JSONDecodeError as exception:
-            raise TransportError(f"received invalid JSON: {exception}") from None
+            raise TransportError(
+                f"received invalid JSON: {exception}", may_have_been_sent=True
+            ) from None
         if not isinstance(decoded, dict):
-            raise TransportError("received JSON that is not an object")
+            raise TransportError(
+                "received JSON that is not an object", may_have_been_sent=True
+            )
         return cast("CommandResult", decoded)
 
     def _require_open(self) -> ClientConnection:
@@ -205,15 +218,52 @@ class WebSocketBridge(ScoreBridge):
     def _validate_payload(self, payload: dict[str, Any]) -> None:
         """Reject unsupported requests before sending, including after reconnect."""
 
+    def _is_replay_safe(self, payload: dict[str, Any]) -> bool:
+        """Whether repeating this exact payload is known not to change the score.
+
+        Protocol implementations opt in only documented read-only operations.
+        Unknown commands and batches remain unsafe even if a peer accepts them.
+        """
+        return False
+
+    def _failed_request_error(
+        self, payload: dict[str, Any], exception: TransportError
+    ) -> BridgeError:
+        """Describe an unsafe request without claiming its effects were reverted."""
+        unknown = exception.may_have_been_sent
+        operation = str(
+            payload.get("command")
+            or payload.get("commandName")
+            or payload.get("message")
+            or "unknown"
+        )
+        request_id = str(uuid4())
+        message = (
+            f"{self.application_name} {operation} outcome is unknown: "
+            "the request may have been applied, but no valid reply was received. "
+            "It was not replayed. Inspect the score before retrying or undoing."
+            if unknown
+            else f"{self.application_name} {operation} was not sent; "
+            "the connection was already closed. It was not replayed."
+        )
+        return BridgeError(
+            message,
+            code="outcome_unknown" if unknown else "request_not_sent",
+            mutation_status="unknown" if unknown else "not_applied",
+            operation=operation,
+            request_id=request_id,
+            request_id_scope="client_correlation_only",
+            target=payload.get("params", payload.get("parameters")),
+            replayed=False,
+            cause=str(exception),
+        )
+
     async def _exchange(self, payload: dict[str, Any]) -> CommandResult:
-        """Send *payload* and return the reply, connecting first if needed.
+        """Send once, retrying a lost exchange only for allowlisted safe reads.
 
-        A connection that breaks during the exchange is reopened once and
-        the payload is sent again.
-
-        Raises:
-            BridgeError: When the application cannot be reached, or the
-                connection is lost and cannot be reopened.
+        Mutations and unknown commands are never automatically replayed. A
+        failure after attempting to send one leaves its application outcome
+        unknown; the caller must inspect the score before deciding what to do.
         """
         if not self.is_connected and not await self.connect():
             raise BridgeError(
@@ -226,8 +276,13 @@ class WebSocketBridge(ScoreBridge):
         try:
             return await transport.request(payload)
         except TransportError as exception:
+            if not self._is_replay_safe(payload):
+                await self.disconnect()
+                raise self._failed_request_error(payload, exception) from exception
             logger.warning(
-                "%s: %s; reconnecting once", self.application_name, exception
+                "%s: %s; reconnecting once for a safe read",
+                self.application_name,
+                exception,
             )
         await self.disconnect()
         if not await self.connect():
@@ -241,6 +296,7 @@ class WebSocketBridge(ScoreBridge):
         try:
             return await transport.request(payload)
         except TransportError as exception:
+            await self.disconnect()
             raise BridgeError(
                 f"{self.application_name} request failed: {exception}"
             ) from None
