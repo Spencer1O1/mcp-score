@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         DurationPolicy,
         ExpectedDurationEvent,
     )
+    from mcp_score.bridge.lyric_text import LyricTextEdit, LyricTextRequest
     from mcp_score.bridge.note_rest import (
         FillRestRequest,
         NoteRestEdit,
@@ -219,6 +220,10 @@ class ScoreBridge(ABC):
         """Select a range of measures (1-indexed) and staves (0-indexed), inclusive."""
 
     # ── Writing ─────────────────────────────────────────────────────
+
+    async def set_lyric_text(self, request: LyricTextRequest) -> LyricTextEdit:
+        """Change one existing guarded plain-text lyric."""
+        raise BridgeError(f"{self.application_name} cannot edit guarded lyric text.")
 
     async def fill_rest_with_note(self, request: FillRestRequest) -> NoteRestEdit:
         """Replace guarded rest coverage with one concert-pitched note."""

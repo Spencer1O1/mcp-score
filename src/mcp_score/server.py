@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp_score.bridge import BridgeRegistry
 from mcp_score.context import AppState
 from mcp_score.tools import ToolModule, analysis, connection, generate, manipulation
+from mcp_score.tools import lyric_text as lyric_text_tools
 from mcp_score.tools import note_rest as note_rest_tools
 from mcp_score.tools import receipts as receipt_tools
 from mcp_score.tools import render as render_tools
@@ -27,6 +28,7 @@ TOOL_MODULES: tuple[ToolModule, ...] = (
     analysis,
     manipulation,
     note_rest_tools,
+    lyric_text_tools,
     receipt_tools,
     generate,
     render_tools,

@@ -586,6 +586,69 @@ execution. Normal raw/legacy mutations remain outside this duplicate guarantee.
 | ------- | ------ | ------------------------------------------------------------- |
 | `undo`  | none   | Undo the last action; reports the cursor position afterwards. |
 
+### Guarded existing lyric text
+
+`set_live_lyric_text` sends `setLyricText` with explicit
+`{measure, staff, voice, offset, lyricIndex, plainText, expected}`. Supply a fresh
+complete `ChordToneSnapshot` (including ordered lyrics/articulations), with an
+ephemeral zero-based lyric index. The synchronous handler compares the exposed
+chord snapshot before changing one existing lyric. No lyric is created or
+removed. Verse, placement, syllabic state, timing and formatting are not edited.
+
+Native support requires MuseScore 4.7+ in major version 4: earlier wrappers lack
+dedicated `Lyrics.plainText`, `isMelisma` and `separator` metadata. Selected lyrics
+must have SINGLE syllabic, zero exact lyric ticks, no melisma and no separator.
+Duplicate verse/placement identities, noncanonical/rich text, symbols, framed
+lyrics and unknown eligibility/appearance metadata reject. A known empty native
+master excerpt list is required, even when the active score is a part, to reject
+known linked-part propagation. Within-score changes outside the requested text
+are checked across all exposed measure tracks. Unexposed links and every
+engraving property remain outside the guarantee; no score identity/revision is
+established.
+
+Input is literal plain Unicode, not XML, with no trimming or normalization.
+Nonempty single-line scalar strings of at most 512 characters are accepted;
+controls, newlines, unpaired surrogates and Unicode noncharacters reject. Encoding
+escapes `&`, `<`, `>` and double quotes in one pass, leaving apostrophes literal.
+The native text parser does not support `&apos;` or numeric entities. Existing
+XML must exactly equal this canonical encoding of actual native `plainText`;
+formatted or noncanonical content is rejected instead of being stripped. Native
+XML and decoded plain text must both match after the write.
+
+Only the undo-backed native TEXT property is assigned. Selected native font,
+font size/style, line spacing, alignment, user offsets, visibility/autoplace,
+color and linking flags are compared privately alongside verse/placement/timing.
+Float appearance values never enter receipt JSON; `verified_native_fields` lists
+the native API property names checked, while selected before/after core metadata
+contains only strings and integers. Actual target before/after notation is
+returned. All-track measure events and exposed score-spanner metadata must match
+outside the declared text edit. Parent note/chord slurs are permitted when that
+metadata remains unchanged; they are distinct from a lyric's own separator.
+Computed layout positions and viewport/dirty state are not verified.
+
+Equal text creates no command/history entry. Otherwise one native command owns
+the write and verification; cancellation claims `rolled_back` only after fresh
+reads restore the exposed original state. Unknown commit stays `unknown`, known
+committed but unverified changes stay `applied_unverified`. No global undo,
+sequence execution or automatic replay is used. UI selection/layout may change;
+the logical bridge position is untouched. Optional `execute_mutation_once` kind
+`set_lyric_text` retains caller ID/session history, including errors and replies
+after undo, without claiming current-state verification.
+
+Existing disposable pitch and both note-rest display-mode phases exercise lyric
+editing without extra application startups. Their optional owned-copy installer
+adds only fixed no-argument arm/read commands and a one-shot failure immediately
+after the real TEXT assignment. It captures actual XML/plain strings, then tests
+restoration and preservation of a prior observable undo entry. All paths and
+unique sentinels are validated before writes. Normal packaged plugin source has
+no test hooks; the next startup restores production files. Older native jobs
+actively prove unsupported responses rather than skipping.
+
+Source contracts: [native lyric wrapper](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/elements.h),
+[TEXT getter/setter and parser](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/dom/textbase.cpp),
+[canonical escaping](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/types/string.cpp),
+and [undo-backed property assignment](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/scoreelement.cpp).
+
 ### Guarded rest and single-note replacement
 
 `fill_live_rest` (`fillRestWithNote`) replaces the onset of an existing plain

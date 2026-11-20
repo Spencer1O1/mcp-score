@@ -712,6 +712,65 @@ def _install_note_rest_fixture(layout: Layout) -> None:
     qml.write_text(qml_text)
 
 
+def _install_lyric_fixture(layout: Layout) -> None:
+    """Inject fixed post-rewrite failures only into the marked disposable copy."""
+    validate_artifact_boundary(layout)
+    marker = layout.root / PROFILE_MARKER
+    if (
+        not unlinked_log_source(marker, layout.root)
+        or not marker.is_file()
+        or marker.read_text() != PROFILE_MARKER_CONTENT
+    ):
+        raise HarnessError("Lyric text fixture requires a marked owned profile")
+    directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+    qml, module = directory / PLUGIN_QML_NAME, directory / "lyric-text.js"
+    driver = directory / "lyric-text-fixture.js"
+    source = REPOSITORY_ROOT / "tests/integration/plugin/lyric-text-fixture.js"
+    if not all(
+        unlinked_log_source(path, layout.root) for path in (qml, module, driver)
+    ):
+        raise HarnessError("Refusing a linked lyric text fixture destination")
+    if not unlinked_log_source(source, REPOSITORY_ROOT) or not source.is_file():
+        raise HarnessError("Refusing a linked or missing lyric text fixture source")
+    qml_text, module_text = qml.read_text(), module.read_text()
+    qml_replacements = {
+        'import "lyric-text.js" as LyricText': (
+            'import "lyric-text.js" as LyricText\n'
+            'import "lyric-text-fixture.js" as LyricTextFixture'
+        ),
+        "property var receiptState: null": (
+            "property var receiptState: null\n    property var lyricTextFault: null"
+        ),
+        '"setLyricText":         LyricText.setLyricText,': (
+            '"setLyricText":         LyricText.setLyricText,\n'
+            '        "_testArmLyricText": LyricTextFixture.arm,\n'
+            '        "_testReadLyricTextFault": LyricTextFixture.read,'
+        ),
+    }
+    module_replacements = {
+        '.import "score.js" as Score': (
+            '.import "score.js" as Score\n'
+            '.import "lyric-text-fixture.js" as LyricTextFixture'
+        ),
+        "before.lyric.text=encode(params.plainText);": (
+            "before.lyric.text=encode(params.plainText);\n"
+            "        LyricTextFixture.capture(plugin,before.lyric);"
+        ),
+    }
+    if any(qml_text.count(value) != 1 for value in qml_replacements) or any(
+        module_text.count(value) != 1 for value in module_replacements
+    ):
+        raise HarnessError("Lyric text fixture sentinel is missing or ambiguous")
+    driver_text = source.read_text()
+    for value, replacement in qml_replacements.items():
+        qml_text = qml_text.replace(value, replacement)
+    for value, replacement in module_replacements.items():
+        module_text = module_text.replace(value, replacement)
+    driver.write_text(driver_text)
+    module.write_text(module_text)
+    qml.write_text(qml_text)
+
+
 def child_environment(settings: Settings) -> dict[str, str]:
     """Isolate child-process application paths without changing HOME."""
     root = settings.layout.root
@@ -1409,6 +1468,8 @@ def start(settings: Settings, score: Path) -> None:
             _install_chord_tone_fixture(settings.layout)
         if os.environ.get("MUSESCORE_NOTE_REST_TEST_SETUP") == "1":
             _install_note_rest_fixture(settings.layout)
+        if os.environ.get("MUSESCORE_LYRIC_TEST_SETUP") == "1":
+            _install_lyric_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)

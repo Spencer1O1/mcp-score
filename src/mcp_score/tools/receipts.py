@@ -38,8 +38,9 @@ async def execute_mutation_once(
     changing the payload conflicts. This command is never automatically replayed.
     After a lost response or cancellation, explicitly retry the exact request or
     read its receipt. Never replace the session token automatically after restart.
-    Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone and
-    remove_chord_tone. The matching native command must be advertised; older
+    Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone,
+    remove_chord_tone and set_lyric_text. The matching native command must be
+    advertised; older
     plugins reject unsupported kinds before sending. Direct mutation tools are
     not protected. Batch targets must be distinct chords, at most 32.
 

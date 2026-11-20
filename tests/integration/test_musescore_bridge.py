@@ -184,6 +184,8 @@ class TestMuseScoreBridgeCapabilities:
             assert "removeChordTone" in diagnostics.commands
             assert "addChordTone" not in diagnostics.sequence_commands
             assert "removeChordTone" not in diagnostics.sequence_commands
+            assert "_testArmLyricText" not in diagnostics.commands
+            assert "_testReadLyricTextFault" not in diagnostics.commands
             assert "_testArmChordToneAdd" not in diagnostics.commands
             assert "_testArmChordToneRemove" not in diagnostics.commands
             assert "setNotePitches" in diagnostics.commands

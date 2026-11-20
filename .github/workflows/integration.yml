@@ -85,6 +85,7 @@ jobs:
       - name: Start disposable note-rest normal fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
@@ -92,11 +93,13 @@ jobs:
       - name: Guarded note-rest normal mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "normal"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable note-rest concert fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
@@ -104,7 +107,8 @@ jobs:
       - name: Guarded note-rest concert mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "concert"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start multi-staff passage fixture
         env:
@@ -136,6 +140,7 @@ jobs:
         env:
           MUSESCORE_PITCH_BATCH_TEST_SETUP: "1"
           MUSESCORE_CHORD_TONE_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
@@ -145,8 +150,9 @@ jobs:
           MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
           MCP_SCORE_PITCH_BATCH_FIXTURE: "1"
           MCP_SCORE_CHORD_TONE_FIXTURE: "1"
+          MCP_SCORE_LYRIC_FIXTURE: "pitch"
           MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
-        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py -v
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |
@@ -236,6 +242,7 @@ jobs:
       - name: Start disposable note-rest normal fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
@@ -243,11 +250,13 @@ jobs:
       - name: Guarded note-rest normal mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "normal"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable note-rest concert fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
@@ -255,7 +264,8 @@ jobs:
       - name: Guarded note-rest concert mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "concert"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start multi-staff passage fixture
         env:
@@ -287,6 +297,7 @@ jobs:
         env:
           MUSESCORE_PITCH_BATCH_TEST_SETUP: "1"
           MUSESCORE_CHORD_TONE_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
@@ -296,8 +307,9 @@ jobs:
           MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
           MCP_SCORE_PITCH_BATCH_FIXTURE: "1"
           MCP_SCORE_CHORD_TONE_FIXTURE: "1"
+          MCP_SCORE_LYRIC_FIXTURE: "pitch"
           MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
-        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py -v
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |
@@ -389,6 +401,7 @@ jobs:
       - name: Start disposable note-rest normal fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
@@ -396,11 +409,13 @@ jobs:
       - name: Guarded note-rest normal mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "normal"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable note-rest concert fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
@@ -408,7 +423,8 @@ jobs:
       - name: Guarded note-rest concert mode and native cancellation tests
         env:
           MCP_SCORE_NOTE_REST_FIXTURE: "concert"
-        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+          MCP_SCORE_LYRIC_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start multi-staff passage fixture
         env:
@@ -440,6 +456,7 @@ jobs:
         env:
           MUSESCORE_PITCH_BATCH_TEST_SETUP: "1"
           MUSESCORE_CHORD_TONE_TEST_SETUP: "1"
+          MUSESCORE_LYRIC_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
@@ -449,8 +466,9 @@ jobs:
           MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
           MCP_SCORE_PITCH_BATCH_FIXTURE: "1"
           MCP_SCORE_CHORD_TONE_FIXTURE: "1"
+          MCP_SCORE_LYRIC_FIXTURE: "pitch"
           MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
-        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py -v
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py tests/integration/test_musescore_pitch_batch.py tests/integration/test_musescore_chord_tone.py tests/integration/test_musescore_lyric_text.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |

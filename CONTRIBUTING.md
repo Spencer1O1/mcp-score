@@ -238,6 +238,15 @@ Releases follow [semver](https://semver.org/); versions stay 0.x until the
 tool set is stable, so minor releases may still change tool names and
 parameters.
 
+The existing restarted-pitch and both note/rest phases can additionally set
+`MUSESCORE_LYRIC_TEST_SETUP=1` and `MCP_SCORE_LYRIC_FIXTURE=pitch`, `normal` or
+`concert` for the matching test invocation. The fixed owned-copy driver observes
+native XML/plain text immediately after the real TEXT write and fails once to
+prove cancellation plus prior-history preservation. It accepts no code or fault
+parameters; paths/ownership/sentinels are checked before writes, the packaged
+plugin lacks its commands, and normal reseeding removes it. No uncertain failure
+or undo response authorizes cleanup/retry undo.
+
 The guarded note/rest phases start their own `guarded-note-rest.musicxml` and
 `guarded-note-rest-concert.musicxml` fixtures with
 `MUSESCORE_NOTE_REST_TEST_SETUP=1`. Only their marked installed plugin copies
