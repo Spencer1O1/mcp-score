@@ -197,6 +197,43 @@ bridge cursor. Not available with Dorico or an older MuseScore plugin.
 | `range_complete` | `bool`                 | Whether every requested measure and rhythmic event was traversed.          |
 | `unsupported`    | `list[str]`            | Notation details not serialized, even when the rhythmic range is complete. |
 
+### `get_event_at_position`
+
+Read the chord or rest starting at an exact live MuseScore position.
+
+All position coordinates are explicit. Offsets are exact fractions of a
+whole note: 1/2 selects an onset halfway through a whole note, not beat 2.
+Equivalent fractions select the same onset. A position inside a sustained
+event does not match. Non-rhythmic annotations are excluded, and ambiguous
+onsets are rejected. Uses one live passage read without moving selection
+or the bridge cursor, including unsaved changes.
+
+Omitting note_index returns the entire event; supplying it also returns
+that tone from the event's current notes list. Indices are ephemeral
+ordering within this response. The result preserves the passage reader's
+unsupported notation list. It provides no stable event ID, score identity,
+revision token, or guarantee that the address remains valid for an edit.
+
+| Parameter            | Type          | Default    | Description                                                                                   |
+| -------------------- | ------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `measure`            | `int`         | (required) | Ordinal measure (integer >= 1; repeats not expanded).                                         |
+| `staff`              | `int`         | (required) | Staff index (integer >= 0).                                                                   |
+| `voice`              | `int`         | (required) | Voice index (integer from 0 through 3).                                                       |
+| `offset_numerator`   | `int`         | (required) | Whole-note onset fraction numerator (integer >= 0).                                           |
+| `offset_denominator` | `int`         | (required) | Whole-note onset fraction denominator (integer > 0).                                          |
+| `note_index`         | `int \| None` | `None`     | Index into the returned chord's notes (integer >= 0). Omit to select the whole chord or rest. |
+
+**Returns** `LocatedEvent`: A current rhythmic event, without durable identity or edit preconditions.
+
+| Field         | Type                  | Description                                                           |
+| ------------- | --------------------- | --------------------------------------------------------------------- |
+| `source`      | `str`                 |                                                                       |
+| `scope`       | `str`                 | The address and note index describe only the returned live snapshot.  |
+| `address`     | `EventAddress`        | Requested address with its whole-note offset reduced to lowest terms. |
+| `event`       | `PassageEvent`        | The entire chord or rest, including all chord tones.                  |
+| `note`        | `PassageNote \| None` | The selected tone, or null when the whole event was requested.        |
+| `unsupported` | `list[str]`           | Notation details omitted by the underlying live passage reader.       |
+
 ### `get_selection_properties`
 
 Get properties of the current selection in the connected application.
@@ -578,6 +615,19 @@ What sits at the cursor: a chord, a rest, a single note or something else.
 | `pitch`    | `int \| None`        | MIDI pitch of a single note.         |
 | `tpc`      | `int \| None`        | Tonal pitch class of a single note.  |
 | `name`     | `str \| None`        | Name of a single note.               |
+
+### `EventAddress`
+
+A rhythmic event onset and optional chord-tone index in one read.
+
+| Field                | Type          | Description                                                            |
+| -------------------- | ------------- | ---------------------------------------------------------------------- |
+| `measure`            | `int`         | Ordinal measure, starting at one, without expanding repeats.           |
+| `staff`              | `int`         | Staff index, starting at zero.                                         |
+| `voice`              | `int`         | Voice index, starting at zero.                                         |
+| `offset_numerator`   | `int`         | Numerator of the exact onset offset as a fraction of a whole note.     |
+| `offset_denominator` | `int`         | Denominator of the whole-note onset offset.                            |
+| `note_index`         | `int \| None` | Index into this read's chord tones; omitted to select the whole event. |
 
 ### `MuseScoreDiagnostics`
 

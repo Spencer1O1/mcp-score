@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import StrictInt, ValidationError
+
+from mcp_score.bridge.event_address import EventAddress, LocatedEvent, locate_event
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import SelectionProperties
 from mcp_score.context import ScoreContext
@@ -84,6 +87,56 @@ def _require_track(staff: int | None, voice: int | None) -> None:
 
 
 @score_tool
+async def get_event_at_position(
+    context: ScoreContext,
+    measure: StrictInt,
+    staff: StrictInt,
+    voice: StrictInt,
+    offset_numerator: StrictInt,
+    offset_denominator: StrictInt,
+    note_index: StrictInt | None = None,
+) -> LocatedEvent:
+    """Read the chord or rest starting at an exact live MuseScore position.
+
+    All position coordinates are explicit. Offsets are exact fractions of a
+    whole note: 1/2 selects an onset halfway through a whole note, not beat 2.
+    Equivalent fractions select the same onset. A position inside a sustained
+    event does not match. Non-rhythmic annotations are excluded, and ambiguous
+    onsets are rejected. Uses one live passage read without moving selection
+    or the bridge cursor, including unsaved changes.
+
+    Omitting note_index returns the entire event; supplying it also returns
+    that tone from the event's current notes list. Indices are ephemeral
+    ordering within this response. The result preserves the passage reader's
+    unsupported notation list. It provides no stable event ID, score identity,
+    revision token, or guarantee that the address remains valid for an edit.
+
+    Args:
+        measure: Ordinal measure (integer >= 1; repeats not expanded).
+        staff: Staff index (integer >= 0).
+        voice: Voice index (integer from 0 through 3).
+        offset_numerator: Whole-note onset fraction numerator (integer >= 0).
+        offset_denominator: Whole-note onset fraction denominator (integer > 0).
+        note_index: Index into the returned chord's notes (integer >= 0).
+            Omit to select the whole chord or rest.
+    """
+    bridge = require_bridge(context)
+    try:
+        address = EventAddress(
+            measure=measure,
+            staff=staff,
+            voice=voice,
+            offset_numerator=offset_numerator,
+            offset_denominator=offset_denominator,
+            note_index=note_index,
+        )
+    except ValidationError as error:
+        raise ToolError(f"Invalid event address: {error}") from error
+    passage = await bridge.read_passage(measure, measure, staff, voice)
+    return locate_event(passage, address)
+
+
+@score_tool
 async def get_selection_properties(context: ScoreContext) -> SelectionProperties:
     """Get properties of the current selection in the connected application.
 
@@ -97,5 +150,10 @@ async def get_selection_properties(context: ScoreContext) -> SelectionProperties
 
 
 def register(server: MCPServer) -> None:
-    for tool in (read_passage, get_measure_content, get_selection_properties):
+    for tool in (
+        read_passage,
+        get_measure_content,
+        get_event_at_position,
+        get_selection_properties,
+    ):
         server.tool()(tool)
