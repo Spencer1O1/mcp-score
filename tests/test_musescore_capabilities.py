@@ -143,6 +143,7 @@ class TestCommandPreflight:
             capabilities_reply(
                 commands=["getCapabilities", "ping", "getScore", "processSequence"],
                 sequenceCommands=["ping"],
+                receipts=None,
             )
         )
         bridge = MuseScoreBridge()
@@ -171,7 +172,7 @@ class TestCommandPreflight:
             capabilities_reply(protocolVersion=2)
             if incompatible
             else capabilities_reply(
-                commands=["getCapabilities", "ping"], sequenceCommands=[]
+                commands=["getCapabilities", "ping"], sequenceCommands=[], receipts=None
             )
         )
         replacement = fake_connection(reply)

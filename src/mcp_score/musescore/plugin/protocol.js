@@ -1,6 +1,7 @@
 // The handshake is independent of whether a score is open.
 .pragma library
 .import "sequence.js" as Sequence
+.import "receipts.js" as Receipts
 
 var protocolVersion = 1;
 
@@ -14,7 +15,8 @@ function getCapabilities(plugin, params) {
             protocolVersion: protocolVersion,
             pluginVersion: plugin.version,
             commands: Object.keys(plugin.commands).sort(),
-            sequenceCommands: Object.keys(Sequence.steps).sort()
+            sequenceCommands: Object.keys(Sequence.steps).sort(),
+            receipts: Receipts.capabilities(plugin)
         }
     };
 }

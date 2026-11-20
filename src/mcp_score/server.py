@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp_score.bridge import BridgeRegistry
 from mcp_score.context import AppState
 from mcp_score.tools import ToolModule, analysis, connection, generate, manipulation
+from mcp_score.tools import receipts as receipt_tools
 from mcp_score.tools import render as render_tools
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ TOOL_MODULES: tuple[ToolModule, ...] = (
     connection,
     analysis,
     manipulation,
+    receipt_tools,
     generate,
     render_tools,
 )

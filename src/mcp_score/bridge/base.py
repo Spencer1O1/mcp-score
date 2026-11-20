@@ -21,6 +21,11 @@ if TYPE_CHECKING:
     from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
+    from mcp_score.bridge.receipts import (
+        MutationReceipt,
+        ReceiptExecution,
+        ReceiptIdentity,
+    )
     from mcp_score.bridge.results import (
         BarlineSet,
         ChordSymbolAdded,
@@ -142,6 +147,18 @@ class ScoreBridge(ABC):
         """Read the actual native UI selection without changing it."""
         raise BridgeError(
             f"{self.application_name} cannot read the actual UI selection."
+        )
+
+    async def execute_mutation_once(self, request: ReceiptExecution) -> MutationReceipt:
+        """Execute only supported, explicitly identified mutations."""
+        raise BridgeError(
+            f"{self.application_name} does not support mutation receipts."
+        )
+
+    async def read_mutation_receipt(self, request: ReceiptIdentity) -> MutationReceipt:
+        """Retrieve historical operation state without executing it."""
+        raise BridgeError(
+            f"{self.application_name} does not support mutation receipts."
         )
 
     # ── Navigation and selection ────────────────────────────────────

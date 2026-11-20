@@ -87,12 +87,25 @@ MUSESCORE_HANDSHAKE: dict[str, Any] = {
                 MuseScoreCommand.GET_CURSOR_INFO,
                 MuseScoreCommand.READ_PASSAGE,
                 MuseScoreCommand.READ_CURRENT_SELECTION,
+                MuseScoreCommand.EXECUTE_MUTATION_ONCE,
+                MuseScoreCommand.READ_MUTATION_RECEIPT,
                 MuseScoreCommand.SET_NOTE_PITCH,
                 MuseScoreCommand.SET_EVENT_DURATION,
                 MuseScoreCommand.UNDO,
                 MuseScoreCommand.PROCESS_SEQUENCE,
             }
         ],
+        "receipts": {
+            "protocolVersion": 1,
+            "pluginSession": "test-plugin-session",
+            "supportedMutations": ["setNotePitch"],
+            "capacity": 64,
+            "maxPayloadUnits": 65536,
+            "maxReplyUnits": 262144,
+            "maxDepth": 32,
+            "maxNodes": 16384,
+            "retention": "plugin_session_non_evicting",
+        },
     }
 }
 """Capabilities returned by the test plugin during connection negotiation."""

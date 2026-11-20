@@ -40,6 +40,8 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         "get_event_at_position",
         "get_selection_properties",
         "read_current_selection",
+        "execute_mutation_once",
+        "read_mutation_receipt",
         # manipulation
         "add_live_note",
         "set_live_note_pitch",

@@ -97,6 +97,7 @@ async def test_new_edit_requires_advertised_capability_before_sending(
 ) -> None:
     handshake = deepcopy(MUSESCORE_HANDSHAKE)
     handshake["result"]["commands"].remove("setNotePitch")
+    handshake["result"]["receipts"]["supportedMutations"] = []
     connection = fake_connection(handshake)
     bridge = registry.musescore
     expected = _chord()
