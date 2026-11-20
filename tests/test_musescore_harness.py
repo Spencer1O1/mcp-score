@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -198,20 +198,21 @@ class TestSeedConfiguration:
             for entry in enabled
         )
 
-    def test_binds_shortcut_to_every_action_code_form(self, tmp_path: Path) -> None:
-        # Arrange
+    def test_preserves_existing_shortcuts_and_does_not_create_bindings(
+        self, tmp_path: Path
+    ) -> None:
         layout = harness.layout_for("Linux", tmp_path)
+        layout.data_dir.mkdir(parents=True)
+        shortcuts = layout.data_dir / "shortcuts.xml"
+        existing = "<Shortcuts><SC><key>save</key><seq>Ctrl+S</seq></SC></Shortcuts>"
+        shortcuts.write_text(existing)
 
-        # Act
         harness.seed_configuration(layout)
+        assert shortcuts.read_text() == existing
 
-        # Assert
-        shortcuts = (layout.data_dir / "shortcuts.xml").read_text()
-        for code in harness.PLUGIN_ACTION_CODES:
-            assert f"<key>{code}</key>" in shortcuts
-        assert shortcuts.count(f"<seq>{harness.PLUGIN_SHORTCUT}</seq>") == len(
-            harness.PLUGIN_ACTION_CODES
-        )
+        shortcuts.unlink()
+        harness.seed_configuration(layout)
+        assert not shortcuts.exists()
 
     def test_suppresses_startup_dialogs_and_stale_session(self, tmp_path: Path) -> None:
         # Arrange
@@ -230,6 +231,7 @@ class TestSeedConfiguration:
             "hasCompletedFirstLaunchSetup=true\n"
             "welcomeDialogShowOnStartup=false\n"
             "welcomeDialogLastShownVersion=99.0.0\n"
+            "checkForUpdate=false\n"
         )
         assert not stale_session.exists()
 
@@ -268,6 +270,14 @@ class TestSeedConfiguration:
                 "application.welcomeDialogLastShownVersion",
                 "-string",
                 "99.0.0",
+            ],
+            [
+                "defaults",
+                "write",
+                "org.musescore.MuseScore4",
+                "application.checkForUpdate",
+                "-bool",
+                "false",
             ],
         ]
 
@@ -328,3 +338,82 @@ class TestMuseScoreProcessPattern:
 
     def test_windows_matches_the_image_name(self) -> None:
         assert harness.musescore_process_pattern("Windows") == "MuseScore4.exe"
+
+
+class TestPluginMenuStartup:
+    def test_linux_uses_visible_window_and_menu_navigation(self) -> None:
+        settings = MagicMock(system="Linux")
+        commands: list[list[str]] = []
+
+        def record(command: list[str], **kwargs: object) -> MagicMock:
+            commands.append(command)
+            return MagicMock(stdout="42\n", returncode=0)
+
+        with (
+            patch.object(harness, "run", side_effect=record),
+            patch.object(harness.time, "sleep"),
+        ):
+            harness.trigger_plugin(settings)
+
+        assert commands[0] == [
+            "xdotool",
+            "search",
+            "--onlyvisible",
+            "--class",
+            "mscore|MuseScore",
+        ]
+        assert [command for command in commands if command[1] == "key"] == [
+            ["xdotool", "key", "--clearmodifiers", "Escape"],
+            ["xdotool", "key", "--clearmodifiers", "alt+p"],
+            ["xdotool", "key", "--clearmodifiers", "End", "Right"],
+            ["xdotool", "key", "--clearmodifiers", "Return"],
+        ]
+        assert not any("mousemove" in command for command in commands)
+
+    def test_linux_falls_back_to_windowfocus_without_window_manager(self) -> None:
+        settings = MagicMock(system="Linux")
+        commands: list[list[str]] = []
+
+        def record(command: list[str], **kwargs: object) -> MagicMock:
+            commands.append(command)
+            return MagicMock(stdout="42\n", returncode=int("windowactivate" in command))
+
+        with (
+            patch.object(harness, "run", side_effect=record),
+            patch.object(harness.time, "sleep"),
+        ):
+            harness.trigger_plugin(settings)
+        assert ["xdotool", "windowfocus", "--sync", "42"] in commands
+
+    def test_linux_missing_visible_window_reports_startup_failure(self) -> None:
+        settings = MagicMock(system="Linux")
+        with (
+            patch.object(harness, "run", return_value=MagicMock(stdout="")),
+            patch.object(harness, "print_log_tails") as diagnostics,
+            pytest.raises(harness.HarnessError, match="no MuseScore window"),
+        ):
+            harness.trigger_plugin(settings)
+        diagnostics.assert_called_once_with(settings.layout)
+
+
+class TestBridgeReadiness:
+    def test_start_requires_responsive_bridge_after_menu_activation(
+        self, tmp_path: Path
+    ) -> None:
+        executable = tmp_path / "MuseScore"
+        executable.touch()
+        settings = MagicMock(system="Windows", executable=executable)
+        wait = AsyncMock(return_value=False)
+        trigger = MagicMock()
+        with (
+            patch.object(harness, "seed_configuration"),
+            patch.object(harness, "launch"),
+            patch.object(harness, "trigger_plugin", trigger),
+            patch.object(harness, "wait_for_bridge", wait),
+            patch.object(harness, "print_log_tails") as diagnostics,
+            pytest.raises(harness.HarnessError, match="bridge plugin did not answer"),
+        ):
+            harness.start(settings, tmp_path / "fixture.musicxml")
+        trigger.assert_called_once_with(settings)
+        wait.assert_awaited_once_with("ws://localhost:8765", 60.0)
+        diagnostics.assert_called_once_with(settings.layout)

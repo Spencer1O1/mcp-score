@@ -13,8 +13,8 @@ through the GitHub releases API (``GITHUB_TOKEN`` raises the rate limit)
 unless ``MUSESCORE_DOWNLOAD_URL`` names it directly. ``MUSESCORE_CACHE_DIR``
 is where downloads and the unpacked application live.
 
-``start`` rewrites MuseScore's user configuration (plugin, shortcut,
-first-launch flags), so use a throwaway home directory on a machine where
+``start`` rewrites MuseScore's user configuration (plugin and startup flags),
+so use a throwaway home directory on a machine where
 MuseScore is used for real.
 """
 
@@ -84,28 +84,19 @@ LOG_TAIL_LINES = 40
 # MuseScore identifies a plugin by its QML file's path under the plugins
 # directory (ExtPluginsLoader::makeUri).
 PLUGIN_PATH = f"{PLUGIN_DIRECTORY_NAME}/{PLUGIN_QML_NAME}"
-# Bound to every action-code form MuseScore 4 has used for a plugin:
-# muse://...?action=main in 4.4, action://...?action=main from 4.5.
-PLUGIN_ACTION_CODES = (
-    f"muse://extensions/v1/{PLUGIN_PATH}?action=main",
-    f"musescore://extensions/v1/{PLUGIN_PATH}?action=main",
-    f"action://extensions/v1/{PLUGIN_PATH}?action=main",
-)
 # MuseScore 4.4 identifies plugins with a muse:// URI, 4.5 and later with
 # musescore://; each version ignores the entry it does not know.
 PLUGIN_URIS = (
     f"muse://extensions/v1/{PLUGIN_PATH}",
     f"musescore://extensions/v1/{PLUGIN_PATH}",
 )
-PLUGIN_SHORTCUT = "Ctrl+Shift+F12"
+MENU_OPEN_SECONDS = 1.0
 
 # Linux only: the virtual display. Not :99, which is the first display
 # xvfb-run picks; the render tests run under xvfb-run in the same CI job.
 XVFB_DISPLAY = os.environ.get("MUSESCORE_DISPLAY", ":87")
 XVFB_SCREEN = "1600x1000x24"
 XVFB_STARTUP_SECONDS = 10.0
-# xdotool clicks here to focus the score view before sending the shortcut.
-SCORE_VIEW_CLICK = (700, 400)
 
 UNREACHABLE_ERRORS: tuple[type[Exception], ...] = (
     OSError,
@@ -121,7 +112,7 @@ class HarnessError(Exception):
 # ── Platform layout ───────────────────────────────────────────────────
 
 # Preferences that keep MuseScore from opening dialogs over the score
-# window: the first-launch wizard and the "What's new" welcome dialog.
+# window: the first-launch wizard, welcome dialog, and update notifications.
 # MuseScore forces the welcome dialog back on whenever the last version it
 # was shown for is older than the running one, so that version is set far
 # into the future. Keys are Qt settings paths.
@@ -129,6 +120,7 @@ STARTUP_PREFERENCES: dict[str, bool | str] = {
     "application/hasCompletedFirstLaunchSetup": True,
     "application/welcomeDialogShowOnStartup": False,
     "application/welcomeDialogLastShownVersion": "99.0.0",
+    "application/checkForUpdate": False,
 }
 MACOS_PREFERENCES_DOMAIN = "org.musescore.MuseScore4"
 
@@ -372,11 +364,10 @@ def install(settings: Settings) -> Path:
 
 
 def seed_configuration(layout: Layout) -> None:
-    """Install the plugin and configure MuseScore to run it on a shortcut.
+    """Install and enable the bridge as the only manually activated plugin.
 
-    Plugins cannot be started from the command line (``--test-case`` runs
-    MuseScore in console mode without a GUI), so the plugin is enabled and
-    bound to a keyboard shortcut that ``start`` presses after launch.
+    Menu activation selects the only enabled category and plugin, without
+    depending on persisted shortcuts or desktop coordinates.
     """
     install_plugin(layout.plugins_dir)
 
@@ -389,14 +380,6 @@ def seed_configuration(layout: Layout) -> None:
         for uri in PLUGIN_URIS
     ]
     (extensions_dir / "config.json").write_text(json.dumps(enabled))
-
-    bindings = "".join(
-        f"  <SC>\n    <key>{code}</key>\n    <seq>{PLUGIN_SHORTCUT}</seq>\n  </SC>\n"
-        for code in PLUGIN_ACTION_CODES
-    )
-    (layout.data_dir / "shortcuts.xml").write_text(
-        f'<?xml version="1.0" encoding="UTF-8"?>\n<Shortcuts>\n{bindings}</Shortcuts>\n'
-    )
 
     # A leftover session from a previous (killed) run makes MuseScore ask
     # whether to restore it, and that modal dialog steals focus.
@@ -471,86 +454,79 @@ def _start(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
 
 
 def trigger_plugin(settings: Settings) -> None:
-    """Press the plugin shortcut in the MuseScore window.
+    """Open the enabled bridge through MuseScore's Plugins menu.
 
-    The shortcut only reaches the plugin action when the score view has
-    keyboard focus, so the window is activated and clicked first. Escape
-    closes any dialog that still came up.
+    The disposable profile enables only this plugin. Linux and Windows use
+    menu navigation; macOS invokes named native menu items. Custom shortcut
+    registration and absolute screen coordinates are not involved.
     """
-    logger.info("triggering the bridge plugin with %s", PLUGIN_SHORTCUT)
+    logger.info("opening the bridge through the Plugins menu")
     if settings.system == "Windows":
         run(["powershell", "-NoProfile", "-Command", WINDOWS_TRIGGER_SCRIPT])
     elif settings.system == "Darwin":
         run(["osascript", "-e", MACOS_TRIGGER_SCRIPT])
     else:
         env = {**os.environ, "DISPLAY": XVFB_DISPLAY}
-        found = run(["xdotool", "search", "--name", "MuseScore"], env=env, check=False)
+        found = run(
+            ["xdotool", "search", "--onlyvisible", "--class", "mscore|MuseScore"],
+            env=env,
+            check=False,
+        )
         windows = found.stdout.split()
         if not windows:
             print_log_tails(settings.layout)
             raise HarnessError(f"no MuseScore window found on {XVFB_DISPLAY}")
+        # The score title need not contain MuseScore; helper windows may.
         window = windows[-1]
         # Without a window manager (bare Xvfb) windowactivate fails; fall back
-        # to windowfocus and rely on the click below.
+        # to windowfocus before opening the menu.
         if run(
             ["xdotool", "windowactivate", "--sync", window], env=env, check=False
         ).returncode:
             run(["xdotool", "windowfocus", "--sync", window], env=env, check=False)
         run(["xdotool", "key", "--clearmodifiers", "Escape"], env=env)
         time.sleep(DIALOG_DISMISS_SECONDS)
-        x, y = SCORE_VIEW_CLICK
-        run(["xdotool", "mousemove", str(x), str(y), "click", "1"], env=env)
-        run(["xdotool", "key", "--clearmodifiers", "ctrl+shift+F12"], env=env)
+        run(["xdotool", "key", "--clearmodifiers", "alt+p"], env=env)
+        time.sleep(MENU_OPEN_SECONDS)
+        # Manage plugins is first; the sole enabled category is last.
+        run(["xdotool", "key", "--clearmodifiers", "End", "Right"], env=env)
+        time.sleep(MENU_OPEN_SECONDS)
+        run(["xdotool", "key", "--clearmodifiers", "Return"], env=env)
 
 
 WINDOWS_TRIGGER_SCRIPT = r"""
 Add-Type -AssemblyName Microsoft.VisualBasic
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Native {
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")]
-    public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-    public struct RECT { public int Left, Top, Right, Bottom; }
-}
-"@
 $windows = Get-Process MuseScore4 | Where-Object { $_.MainWindowHandle -ne 0 }
 $process = $windows | Select-Object -First 1
 if (-not $process) { throw "no MuseScore window" }
-[Native]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+[Microsoft.VisualBasic.Interaction]::AppActivate($process.Id)
 Start-Sleep -Seconds 1
 [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
 Start-Sleep -Seconds 2
-$rect = New-Object Native+RECT
-[Native]::GetWindowRect($process.MainWindowHandle, [ref]$rect) | Out-Null
-$x = [int](($rect.Left + $rect.Right) * 0.6)
-$y = [int](($rect.Top + $rect.Bottom) * 0.5)
-[Native]::SetCursorPos($x, $y) | Out-Null
-[Native]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
-[Native]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+[System.Windows.Forms.SendKeys]::SendWait("%p")
 Start-Sleep -Seconds 1
-[System.Windows.Forms.SendKeys]::SendWait("^+{F12}")
+[System.Windows.Forms.SendKeys]::SendWait("{END}{RIGHT}")
+Start-Sleep -Seconds 1
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
 """
 
-# Qt reads "Ctrl" in a shortcut as the Command key on macOS, so the
-# shortcut bound as Ctrl+Shift+F12 is pressed as Command+Shift+F12 there.
-# Key code 53 is Escape, 111 is F12.
 MACOS_TRIGGER_SCRIPT = """
 tell application "MuseScore 4" to activate
 delay 1
 tell application "System Events"
     key code 53
     delay 2
-    click at {700, 400}
-    delay 1
-    key code 111 using {command down, shift down}
+    tell (first application process whose frontmost is true)
+        set pluginsMenu to menu bar item "Plugins" of menu bar 1
+        click pluginsMenu
+        delay 1
+        set categoryMenu to menu 1 of pluginsMenu
+        set bridgeCategory to menu item "Composing/arranging tools" of categoryMenu
+        click bridgeCategory
+        delay 1
+        click menu item "MCP Score Bridge" of menu 1 of bridgeCategory
+    end tell
 end tell
 """
 
