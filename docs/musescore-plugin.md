@@ -363,13 +363,17 @@ Linux isolation uses child-specific XDG paths. Windows uses the official portabl
 binary's executable-relative settings and app-data paths, rather than assuming
 `APPDATA` overrides Qt's known-folder APIs. The portable build is identified by
 its deployed data-path literal before launch. macOS uses CoreFoundation's fixed
-user-home override, reads a unique private preference sentinel, and checks
+user-home override with per-child preference-daemon avoidance, reads a unique
+private preference sentinel, and checks
 Foundation's application-support path before launching. Current private logs and
 new application preference writes are required for startup to succeed.
 
 The native path decisions follow [MuseScore's portable settings implementation](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/settings.cpp),
 [its application data resolver](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/internal/globalconfiguration.cpp),
 [Qt's Windows known-folder resolver](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qstandardpaths_win.cpp),
-and [CoreFoundation's fixed-home handling](https://github.com/apple-oss-distributions/CF/blob/main/CFPlatform.c).
+and [CoreFoundation's fixed-home handling](https://github.com/apple-oss-distributions/CF/blob/main/CFPlatform.c)
+and [its preference-daemon environment control](https://github.com/apple-oss-distributions/CF/blob/main/CFRuntime.c).
+Native nonce reads and actual preference writes remain required; the environment
+switches alone do not establish isolation.
 The live platform matrix additionally checks that the ordinary profile remains
 unchanged across startup and shutdown.

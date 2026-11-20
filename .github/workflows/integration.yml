@@ -96,10 +96,6 @@ jobs:
         if: always()
         run: uv run scripts/musescore_harness.py stop
 
-      - name: Verify ordinary user profile was not changed
-        if: always() && steps.profile_snapshot.outcome == 'success'
-        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
-
       - name: Collect private profile logs
         if: always()
         run: uv run scripts/musescore_harness.py collect-logs musescore-logs
@@ -107,6 +103,10 @@ jobs:
       - name: Remove owned private profile after log collection
         if: always()
         run: uv run scripts/musescore_harness.py clean
+
+      - name: Verify ordinary user profile was not changed
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -171,10 +171,6 @@ jobs:
         if: always()
         run: uv run scripts/musescore_harness.py stop
 
-      - name: Verify ordinary user profile was not changed
-        if: always() && steps.profile_snapshot.outcome == 'success'
-        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
-
       - name: Collect private profile logs
         if: always()
         run: uv run scripts/musescore_harness.py collect-logs musescore-logs
@@ -182,6 +178,10 @@ jobs:
       - name: Remove owned private profile after log collection
         if: always()
         run: uv run scripts/musescore_harness.py clean
+
+      - name: Verify ordinary user profile was not changed
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -245,10 +245,6 @@ jobs:
         if: always()
         run: uv run scripts/musescore_harness.py stop
 
-      - name: Verify ordinary user profile was not changed
-        if: always() && steps.profile_snapshot.outcome == 'success'
-        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
-
       - name: Collect private profile logs
         if: always()
         run: uv run scripts/musescore_harness.py collect-logs musescore-logs
@@ -256,6 +252,10 @@ jobs:
       - name: Remove owned private profile after log collection
         if: always()
         run: uv run scripts/musescore_harness.py clean
+
+      - name: Verify ordinary user profile was not changed
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

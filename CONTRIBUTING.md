@@ -102,8 +102,8 @@ uv run scripts/musescore_harness.py stop
 `start` uses a marked private profile under the harness cache. Linux redirects
 only the child process's XDG directories. Windows extracts the official portable
 build into that profile and launches its executable directly; it does not install
-an MSI or run the PortableApps launcher. macOS uses `CFFIXED_USER_HOME` and an
-absolute private preferences plist. `HOME` is unchanged. Document, plugin, and
+an MSI or run the PortableApps launcher. macOS uses `CFFIXED_USER_HOME`, per-child
+`__CFPREFERENCES_AVOID_DAEMON`, and an absolute private preferences plist. `HOME` is unchanged. Document, plugin, and
 temporary paths are private as well.
 
 Before configuration writes, startup refuses an existing MuseScore process or

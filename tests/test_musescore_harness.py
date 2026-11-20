@@ -9,7 +9,7 @@ import plistlib
 import socket
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -565,6 +565,7 @@ class TestPrivateEnvironment:
             assert environment["XDG_DATA_HOME"] == str(settings.layout.root / "data")
         if system == "Darwin":
             assert environment["CFFIXED_USER_HOME"] == str(settings.layout.root)
+            assert environment["__CFPREFERENCES_AVOID_DAEMON"] == "1"
         if system == "Windows":
             assert settings.executable.is_relative_to(settings.layout.root)
             assert "Program Files" not in str(settings.executable)
@@ -622,3 +623,178 @@ def test_occupied_bridge_refuses_before_creating_private_profile(
             harness.start(settings, score)
     seed.assert_not_called()
     assert not settings.layout.root.exists()
+
+
+def test_windows_path_preferences_use_forward_slashes_in_private_ini(
+    tmp_path: Path,
+) -> None:
+    root = PureWindowsPath("C:/Users/test/private profile")
+    preferences = harness.IniPreferences(tmp_path / "private.ini")
+    layout = MagicMock(
+        root=root,
+        plugins_dir=root / "Plugins",
+        data_dir=tmp_path / "data",
+        preferences=preferences,
+    )
+    with patch.object(harness, "install_plugin"):
+        harness.seed_configuration(layout)
+    text = preferences.file.read_text()
+    assert "myPlugins=C:/Users/test/private profile/Plugins" in text
+    assert "myScores=C:/Users/test/private profile/myScores" in text
+    assert "\\" not in text
+
+
+def test_application_resolution_uses_only_verified_owned_executable(
+    tmp_path: Path,
+) -> None:
+    layout = harness.layout_for("Darwin", tmp_path)
+    stale = harness.OwnedProcess(41, 1.0, "/private/old/mscore", "musescore")
+    owned = harness.OwnedProcess(
+        42, 2.0, "/private/application/MacOS/mscore", "musescore"
+    )
+    process = MagicMock(pid=42)
+    process.name.return_value = "MuseScore Studio Display Name"
+    with (
+        patch.object(harness, "refresh_owned"),
+        patch.object(harness, "read_owned", return_value=[stale, owned]),
+        patch.object(harness, "matching_process", side_effect=[None, process]),
+        patch.object(
+            harness.psutil,
+            "process_iter",
+            side_effect=AssertionError("Do not scan unrelated processes"),
+        ),
+    ):
+        assert harness.owned_musescore_pid(layout) == 42
+
+
+def test_stale_application_executable_never_authorizes_gui_activation(
+    tmp_path: Path,
+) -> None:
+    layout = harness.layout_for("Darwin", tmp_path)
+    stale = harness.OwnedProcess(41, 1.0, "/private/old/mscore", "musescore")
+    with (
+        patch.object(harness, "refresh_owned"),
+        patch.object(harness, "read_owned", return_value=[stale]),
+        patch.object(harness, "matching_process", return_value=None),
+        pytest.raises(harness.HarnessError, match="uniquely identify"),
+    ):
+        harness.owned_musescore_pid(layout)
+
+
+@pytest.mark.parametrize("escape", ["root", "state", "lock"])
+def test_stop_refuses_symlinked_ownership_paths_before_signaling(
+    tmp_path: Path, escape: str
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "preserve.txt"
+    sentinel.write_text("unchanged")
+    if escape == "root":
+        original = settings.layout.root
+        relocated = external / "profile"
+        original.rename(relocated)
+        original.symlink_to(relocated, target_is_directory=True)
+    elif escape == "state":
+        record = external / "record.json"
+        record.write_text('{"version":1,"processes":[]}')
+        settings.layout.state_file.symlink_to(record)
+    else:
+        lock = (
+            settings.layout.root.parent / f".{settings.layout.root.name}.harness.lock"
+        )
+        lock.symlink_to(sentinel)
+    with (
+        patch.object(harness, "matching_process") as matched,
+        pytest.raises(harness.HarnessError, match="symlink"),
+    ):
+        harness.stop(settings)
+    matched.assert_not_called()
+    assert sentinel.read_text() == "unchanged"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX exec preserves the same process PID")
+@pytest.mark.parametrize("allow_handoff", [True, False])
+def test_real_exec_handoff_requires_original_creation_time_and_exact_expected_binary(
+    tmp_path: Path, allow_handoff: bool
+) -> None:
+    import shutil
+    import time
+
+    executable = shutil.which("sleep")
+    if executable is None:
+        pytest.skip("requires the POSIX sleep utility")
+    target = Path(executable).resolve()
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    release = tmp_path / "release"
+    ready = tmp_path / "ready"
+    script = (
+        "from pathlib import Path; import os,time; "
+        f"ready=Path({str(ready)!r}); release=Path({str(release)!r}); "
+        "ready.touch(); "
+        "\nwhile not release.exists(): time.sleep(.01)\n"
+        f"os.execv({str(target)!r}, ['sleep', '60'])"
+    )
+    process = subprocess.Popen([sys.executable, "-c", script])
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists()
+        before = harness.identify(harness.psutil.Process(process.pid), "musescore")
+        permitted = (
+            str(target) if allow_handoff else str(Path(sys.executable).resolve())
+        )
+        identity = harness.OwnedProcess(
+            before.pid, before.created, before.executable, before.kind, permitted
+        )
+        harness.save_owned(settings.layout, [identity])
+        release.touch()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            current = harness.psutil.Process(process.pid)
+            if Path(current.exe()).resolve() == target:
+                break
+            time.sleep(0.01)
+        assert Path(current.exe()).resolve() == target
+        assert current.create_time() == before.created
+        if allow_handoff:
+            assert harness.matching_process(identity) is not None
+            harness.refresh_owned(settings.layout)
+            after = harness.read_owned(settings.layout)[0]
+            assert after.executable == str(target)
+            assert after.handoff_executable is None
+            assert after.pid == before.pid and after.created == before.created
+            harness.stop(settings)
+            assert process.poll() is not None
+        else:
+            assert harness.matching_process(identity) is None
+            harness.stop(settings)
+            assert process.poll() is None
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+
+
+def test_expected_exec_target_does_not_accept_a_reused_pid(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    unrelated = sleeping_process()
+    try:
+        identity = harness.identify(harness.psutil.Process(unrelated.pid), "musescore")
+        stale = harness.OwnedProcess(
+            identity.pid,
+            identity.created - 100,
+            "/old/launcher",
+            identity.kind,
+            identity.executable,
+        )
+        harness.save_owned(settings.layout, [stale])
+        harness.stop(settings)
+        assert unrelated.poll() is None
+    finally:
+        unrelated.terminate()
+        unrelated.wait(timeout=5)

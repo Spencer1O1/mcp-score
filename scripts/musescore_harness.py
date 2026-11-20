@@ -398,7 +398,7 @@ def seed_configuration(layout: Layout) -> None:
     preferences["mcp-score/profileNonce"] = uuid.uuid4().hex
     for name in PATH_PREFERENCES:
         destination = layout.plugins_dir if name == "myPlugins" else layout.root / name
-        preferences[f"application/paths/{name}"] = str(destination)
+        preferences[f"application/paths/{name}"] = destination.as_posix()
     layout.preferences.write(preferences)
 
     extensions_dir = layout.data_dir / "extensions"
@@ -423,6 +423,9 @@ def child_environment(settings: Settings) -> dict[str, str]:
     environment["TEMP"] = str(root / "tmp")
     if settings.system == "Darwin":
         environment["CFFIXED_USER_HOME"] = str(root)
+        # CoreFoundation otherwise delegates native preferences to the shared
+        # cfprefsd, which does not inherit this child's private home override.
+        environment["__CFPREFERENCES_AVOID_DAEMON"] = "1"
     elif settings.system == "Windows":
         # Qt itself uses WIN_PORTABLE paths, not these environment variables;
         # these also keep environment-based library caches in the private root.
@@ -478,6 +481,8 @@ class OwnedProcess:
     created: float
     executable: str
     kind: str
+    handoff_executable: str | None = None
+    """One explicit launcher exec target; never an arbitrary executable change."""
 
     def __post_init__(self) -> None:
         if (
@@ -489,6 +494,14 @@ class OwnedProcess:
             or not isinstance(self.executable, str)
             or not self.executable
             or self.kind not in {"musescore", "xvfb"}
+            or (
+                self.handoff_executable is not None
+                and (
+                    self.kind != "musescore"
+                    or not isinstance(self.handoff_executable, str)
+                    or not self.handoff_executable
+                )
+            )
         ):
             raise ValueError("Invalid process identity")
 
@@ -500,9 +513,12 @@ def identify(process: psutil.Process, kind: str) -> OwnedProcess:
 def matching_process(identity: OwnedProcess) -> psutil.Process | None:
     try:
         process = psutil.Process(identity.pid)
+        permitted_executables = {os.path.normcase(identity.executable)}
+        if identity.handoff_executable is not None:
+            permitted_executables.add(os.path.normcase(identity.handoff_executable))
         if (
             process.create_time() != identity.created
-            or os.path.normcase(process.exe()) != os.path.normcase(identity.executable)
+            or os.path.normcase(process.exe()) not in permitted_executables
             or process.status() == psutil.STATUS_ZOMBIE
         ):
             return None
@@ -514,6 +530,8 @@ def matching_process(identity: OwnedProcess) -> psutil.Process | None:
 
 
 def read_owned(layout: Layout) -> list[OwnedProcess]:
+    if layout.state_file.is_symlink():
+        raise HarnessError("Refusing a symlinked process ownership record")
     if not layout.state_file.exists():
         return []
     try:
@@ -540,10 +558,23 @@ def save_owned(layout: Layout, identities: list[OwnedProcess]) -> None:
     temporary.replace(layout.state_file)
 
 
-def track_process(layout: Layout, process: subprocess.Popen[bytes], kind: str) -> None:
+def track_process(
+    layout: Layout,
+    process: subprocess.Popen[bytes],
+    kind: str,
+    expected_executable: Path | None = None,
+) -> None:
     identities = read_owned(layout)
     try:
         identity = identify(psutil.Process(process.pid), kind)
+        if expected_executable is not None:
+            identity = OwnedProcess(
+                identity.pid,
+                identity.created,
+                identity.executable,
+                identity.kind,
+                str(expected_executable.resolve()),
+            )
     except psutil.NoSuchProcess:
         return
     if identity not in identities:
@@ -556,10 +587,23 @@ def refresh_owned(layout: Layout) -> None:
     """Capture descendants only through an identity-verified launched process."""
     identities = read_owned(layout)
     additions: list[OwnedProcess] = []
-    for identity in identities:
+    normalized = False
+    for index, identity in enumerate(identities):
         process = matching_process(identity)
         if process is None:
             continue
+        current_executable = process.exe()
+        if current_executable != identity.executable:
+            # matching_process accepted only the recorded explicit exec target
+            # with the original creation time. Make that handoff one-way.
+            identity = OwnedProcess(
+                identity.pid,
+                identity.created,
+                current_executable,
+                identity.kind,
+            )
+            identities[index] = identity
+            normalized = True
         try:
             for child in process.children(recursive=True):
                 child_identity = identify(child, identity.kind)
@@ -567,7 +611,7 @@ def refresh_owned(layout: Layout) -> None:
                     additions.append(child_identity)
         except psutil.NoSuchProcess, psutil.ZombieProcess:
             continue
-    if additions:
+    if additions or normalized:
         save_owned(layout, identities + additions)
 
 
@@ -656,7 +700,12 @@ def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
     """Launch in the private profile and record ownership before waiting."""
     for attempt in range(1, LAUNCH_ATTEMPTS + 1):
         process = _start(settings, score)
-        track_process(settings.layout, process, "musescore")
+        expected_executable = (
+            settings.executable.parent / "bin/mscore4portable"
+            if settings.system == "Linux"
+            else settings.executable
+        )
+        track_process(settings.layout, process, "musescore", expected_executable)
         deadline = time.monotonic() + STARTUP_SECONDS
         while process.poll() is None and time.monotonic() < deadline:
             refresh_owned(settings.layout)
@@ -692,9 +741,29 @@ def owned_musescore_pid(layout: Layout) -> int:
         if identity.kind != "musescore":
             continue
         process = matching_process(identity)
-        if process is not None and process.name().lower() in MUSESCORE_PROCESS_NAMES:
+        if process is None:
+            continue
+        # A native display/process name can differ from the binary's name.
+        # Only the executable of an already verified owned identity is used.
+        if (
+            process.name().lower() in MUSESCORE_PROCESS_NAMES
+            or Path(identity.executable).name.lower() in MUSESCORE_PROCESS_NAMES
+        ):
             candidates.append(process.pid)
     if len(candidates) != 1:
+        statuses = []
+        for identity in read_owned(layout):
+            status = asdict(identity)
+            try:
+                current = psutil.Process(identity.pid)
+                if current.create_time() == identity.created:
+                    status["current_executable"] = current.exe()
+                    status["current_name"] = current.name()
+            except psutil.NoSuchProcess, psutil.ZombieProcess:
+                pass
+            statuses.append(status)
+        (layout.root / "ownership-diagnostics.json").write_text(json.dumps(statuses))
+        logger.error("Owned process resolution failed: %s", statuses)
         raise HarnessError("Cannot uniquely identify the owned MuseScore application")
     return candidates[0]
 
@@ -923,6 +992,8 @@ def start(settings: Settings, score: Path) -> None:
 def profile_lock(layout: Layout) -> Iterator[None]:
     """Hold an OS lock so concurrent start/stop cannot race on one profile."""
     lock_file = layout.root.parent / f".{layout.root.name}.harness.lock"
+    if lock_file.is_symlink():
+        raise HarnessError("Refusing a symlinked harness operation lock")
     with lock_file.open("a+b") as lock:
         try:
             if os.name == "nt":
@@ -977,6 +1048,7 @@ def stop(settings: Settings) -> None:
     marker = settings.layout.root / PROFILE_MARKER
     if not marker.exists() or marker.read_text() != PROFILE_MARKER_CONTENT:
         raise HarnessError("Refusing to stop processes for an unowned profile")
+    claim_profile(settings.layout)
     with profile_lock(settings.layout):
         stop_owned(settings.layout)
 
@@ -987,6 +1059,7 @@ def collect_logs(settings: Settings, destination: Path) -> None:
         settings.layout.log_dir,
         settings.layout.stdout_log,
         settings.layout.root / "xvfb.log",
+        settings.layout.root / "ownership-diagnostics.json",
     ):
         if path.is_dir():
             shutil.copytree(path, destination / path.name, dirs_exist_ok=True)
