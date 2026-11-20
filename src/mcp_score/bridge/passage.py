@@ -51,8 +51,10 @@ class PassageMeasure(Result):
     """Ordinal measure number, starting at one, without expanding repeats."""
     tick: int
     """Absolute measure start in MuseScore ticks."""
+    actual_duration: Duration | None
+    """Actual measure length, as a fraction of a whole note (including pickups)."""
     time_signature: TimeSignature | None
-    """Actual measure time signature; may differ from nominal time in pickups."""
+    """Nominal meter, where exposed; never inferred from the measure length."""
     events: list[PassageEvent]
 
 

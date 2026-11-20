@@ -62,7 +62,9 @@ staves; omitting `voice` reads all voices. These reads do not select elements or
 change the bridge's logical cursor. Measure numbers are ordinal, starting at
 one, without expanding repeats; staff and voice indices start at zero.
 
-Each measure includes its start tick and actual time signature. Events include
+Each measure includes its start tick, actual measure duration, and nominal time
+signature where exposed by MuseScore. Measure duration is not used to infer the
+meter: a whole-note duration alone cannot distinguish 4/4 from 2/2. Events include
 absolute ticks, reduced whole-note offsets, notated durations, elapsed durations
 where available, and all chord tones with concert pitch spelling. A full-measure
 rest spans the actual measure length. Concert names use sounding MIDI pitch and

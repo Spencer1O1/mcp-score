@@ -16,7 +16,8 @@ var unsupportedNotation = [
     "tuplet grouping (notated and elapsed durations are returned)",
     "effective instrument, clef, key and tempo context",
     "displayed measure numbering and persistent event identifiers",
-    "measure-attached elements outside segments"
+    "measure-attached elements outside segments",
+    "system annotations without a staff assignment"
 ];
 
 function integer(value) {
@@ -167,9 +168,10 @@ function readPassage(plugin, params) {
         measures.push({
             measure: measureNumber,
             tick: measureTick,
-            timeSignature: measure.timesigActual ? {
-                numerator: measure.timesigActual.numerator,
-                denominator: measure.timesigActual.denominator
+            actualDuration: duration(measure.timesigActual),
+            timeSignature: measure.timesigNominal ? {
+                numerator: measure.timesigNominal.numerator,
+                denominator: measure.timesigNominal.denominator
             } : null,
             events: events
         });

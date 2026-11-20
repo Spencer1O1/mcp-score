@@ -53,8 +53,10 @@ segments.forEach((value,index) => value.nextInMeasure = segments[index+1] || nul
 const secondSegment = segment(1920, {0:chord([[59,7]])},
     [{type:126,track:0,text:"mf"}]);
 const second = {firstSegment:secondSegment, timesigActual:{numerator:3,denominator:4},
+    timesigNominal:{numerator:3,denominator:4},
     nextMeasure:null};
-const first = {firstSegment:segments[0], timesigActual:{numerator:4,denominator:4},
+const first = {firstSegment:segments[0], timesigActual:{numerator:1,denominator:1},
+    timesigNominal:{numerator:4,denominator:4},
     nextMeasure:second};
 const plugin = {Element:{CHORD:chordType,REST:restType},
     curScore:{nstaves:2,firstMeasure:first},
@@ -103,6 +105,7 @@ def test_read_collects_all_notes_chords_rests_and_offsets_without_moving_cursor(
     assert rest.kind == "rest" and rest.actual_duration == Duration(
         numerator=1, denominator=1
     )
+    assert first.actual_duration == Duration(numerator=1, denominator=1)
     assert first.time_signature == TimeSignature(numerator=4, denominator=4)
     assert passage.measures[1].events[0].notes[0].name == "Cb4"
     assert passage.measures[1].events[0].offset == Duration(numerator=0, denominator=1)

@@ -131,6 +131,9 @@ class TestMuseScoreBridgeReadsFixture:
         assert all(event.actual_duration == _QUARTER_NOTE for event in chords)
         assert passage.range_complete is True
         assert passage.unsupported
+        assert passage.measures[0].actual_duration == Duration(
+            numerator=1, denominator=1
+        )
         assert passage.measures[0].time_signature is not None
         assert passage.measures[0].time_signature.numerator == 4
         assert passage.measures[0].time_signature.denominator == 4

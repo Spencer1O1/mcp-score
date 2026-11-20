@@ -526,6 +526,7 @@ class TestMuseScorePassageReads:
                         {
                             "measure": 2,
                             "tick": 1920,
+                            "actualDuration": {"numerator": 1, "denominator": 1},
                             "timeSignature": {"numerator": 4, "denominator": 4},
                             "events": events,
                         }
