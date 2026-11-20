@@ -2,3 +2,4 @@
 src/mcp_score/musescore/plugin/*.js
 tests/integration/plugin/selection-fixture.js
 tests/integration/plugin/pitch-batch-fixture.js
+tests/integration/plugin/chord-tone-fixture.js

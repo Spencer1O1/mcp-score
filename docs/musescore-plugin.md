@@ -295,11 +295,64 @@ automatic mutation replay is attempted. The response's `snapshot_scope` is
 notation, score identity, revision or the undo stack. Read current state after
 uncertainty rather than blindly retrying or undoing.
 
+## Guarded chord-tone addition and removal
+
+`add_live_chord_tone` and `remove_live_chord_tone` address an existing ordinary
+pitched chord by explicit measure, staff, voice and exact onset. Their new
+`ChordToneSnapshot` requires every exposed fresh event field, including nullable
+`text`, `lyrics` and `articulations`. These operations compare attachment values
+as well as pitches/spellings/rhythm before opening a command. Object-key order
+is irrelevant; array order is retained. This does not change the older pitch
+edit's informational-attachment preconditions.
+
+Addition takes sounding MIDI `pitch` and concert `tpc`. Duplicate sounding tones
+reject without an undo step. All peers must agree on their native written-minus-
+concert TPC interval; the new written spelling uses that interval and must fit
+the native range. The handler creates a plugin-owned NOTE, assigns its pitch,
+and adopts it with native `Chord.add`. Adoption recalculates spelling, so both
+concert and written TPC are explicitly assigned afterward in the same command.
+There is no written-octave guess or concert-mode toggle.
+
+Removal takes a snapshot-local `note_index` and requires at least two tones.
+Removing the final tone is unsupported. The selected tone must have verified
+empty native child and forward/backward spanner lists; ties, grace notes,
+tuplets, drum/tab parts, duplicate tones and microtonality also reject. Missing
+eligibility metadata fails closed: removal is unavailable on MuseScore 4.4,
+whose note wrapper lacks the required endpoint lists. Addition uses the native
+creation/adoption API available throughout the supported versions.
+
+Both mutations preserve every exposed non-note target field and all surviving
+note fields, allowing native chord reordering. Successful changes form one undo
+step and return actual before/after events and ephemeral affected indices. The
+removed wrapper is never accessed after deletion; subsequent verification and
+rollback re-resolve live contents. Native removal can select a surviving note,
+so selection/layout are explicitly not preserved; logical cursor is untouched.
+
+Only a known open command can be cancelled, once. `rolled_back` requires a fresh
+full exposed target snapshot matching the original; failed restoration remains
+`unknown`. A commit attempt revokes cancellation authority. Known committed
+verification failures remain `applied_unverified`, including unavailable final
+reads. There is no global undo, automatic replay or sequence embedding. Scope is
+exposed target contents, without score identity, global revision, other-track,
+written-octave or unexposed engraving-property guarantees. Direct calls have no
+duplicate protection; use the explicit receipt variants below when needed.
+
+Native ownership, TPC reset and undo dispatch follow
+[4.4 Chord.add/remove](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/elements.cpp)
+and [4.7 Chord.add/remove](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/elements.cpp).
+The [4.6 note wrapper](https://github.com/musescore/MuseScore/blob/v4.6.2/src/engraving/api/v1/elements.h)
+exposes the endpoint lists unavailable in 4.4; native removal uses
+[deleteItem](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/editing/edit.cpp),
+including its selection effect. Native fixtures verify add/remove and undo,
+transposed spelling, attachment preservation, refused requests, and fixed
+post-adoption/deletion cancellation in the isolated installed test copy.
+
 ## Retained mutation receipts
 
 `execute_mutation_once` adds duplicate protection to an explicitly identified
-guarded single-pitch or pitch-batch request. Other mutation tools, including
-`set_live_note_pitch` and `set_live_note_pitches`,
+guarded pitch, pitch-batch or chord-tone request. Direct mutation tools, including
+`set_live_note_pitch`, `set_live_note_pitches`, `add_live_chord_tone` and
+`remove_live_chord_tone`,
 retain their existing behavior and **do not** gain duplicate protection.
 
 Before the first execution call:
@@ -310,7 +363,8 @@ Before the first execution call:
    recommended). IDs are global within that plugin instance, not per connection.
 3. Retain the complete `mutation` payload: `kind: set_note_pitch` with a strict
    `PitchEditRequest`, or `kind: set_note_pitches` with `{edits: [...]}`. Include
-   every fresh expected snapshot.
+   every fresh expected snapshot. Chord-tone requests use `add_chord_tone` or
+   `remove_chord_tone` with their strict request and complete `ChordToneSnapshot`.
 4. Call `execute_mutation_once` with that ID, the original session as
    `expected_plugin_session`, and the retained mutation.
 
@@ -326,7 +380,7 @@ array order and every supplied payload field matter. Equivalent fractions or
 updated informational metadata can be different payloads and therefore conflict.
 Different payloads under an existing ID fail without replacing the old receipt.
 Unknown operation kinds, reads and other mutations cannot use this entry point.
-Reusing an ID across single and batch kinds conflicts even if their data overlap.
+Reusing an ID across mutation kinds conflicts even if their data overlap.
 The receipt does not extend the pitch guard to score identity,
 global revision or attachment changes.
 
@@ -405,8 +459,8 @@ Older compatible plugins may still serve existing tools; the receipt tools
 require this capability and reject missing/incompatible versions before sending
 a mutation. Each requested kind also requires its mapped native command in
 `supportedMutations`; older single-only receipt plugins reject batch execution
-before dispatch. Batch support is additive within receipt protocol 1; the native
-wrapper keeps a fixed allowlist for both kinds. The native wrapper independently
+before dispatch. Batch and chord-tone support are additive within receipt
+protocol 1; the native wrapper keeps a fixed allowlist. The native wrapper independently
 requires `receiptVersion: 1` and
 the exact expected session. No receipt-to-legacy fallback exists. Reinstall
 matching server/plugin versions when upgrading; older servers with strict
@@ -464,10 +518,12 @@ verified mutation results.
 
 ### Guarded mutation
 
-| Command          | Params                                                             | Description                                                                                                                        |
-| ---------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `setNotePitches` | `{edits: [<guarded pitch params>, ...]}`                           | Preflight up to 32 distinct chords, write and verify all targets in one undo command. Top-level only; never replayed.              |
-| `setNotePitch`   | `{measure, staff, voice, offset, noteIndex, pitch, tpc, expected}` | Atomically match a complete chord snapshot and change one native note with read-back verification. Top-level only; never replayed. |
+| Command           | Params                                                             | Description                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `addChordTone`    | `{measure, staff, voice, offset, pitch, tpc, expected}`            | Atomically validate a complete exposed snapshot and add one native chord tone; no replay or sequences.                             |
+| `removeChordTone` | `{measure, staff, voice, offset, noteIndex, expected}`             | Remove one ordinary tone while retaining at least one, with native endpoint checks and fresh verification; no replay or sequences. |
+| `setNotePitches`  | `{edits: [<guarded pitch params>, ...]}`                           | Preflight up to 32 distinct chords, write and verify all targets in one undo command. Top-level only; never replayed.              |
+| `setNotePitch`    | `{measure, staff, voice, offset, noteIndex, pitch, tpc, expected}` | Atomically match a complete chord snapshot and change one native note with read-back verification. Top-level only; never replayed. |
 
 ### Navigation
 
@@ -508,7 +564,9 @@ verified mutation results.
 | `readMutationReceipt` | `{receiptVersion: 1, operationId, expectedPluginSession}`           | Look up a receipt in the exact plugin session without executing any mutation.                                   |
 
 `mutation` accepts `{kind: "set_note_pitch", request: <guarded pitch params>}`
-or `{kind: "set_note_pitches", request: {edits: [<guarded pitch params>, ...]}}`.
+or `{kind: "set_note_pitches", request: {edits: [<guarded pitch params>, ...]}}`,
+plus `{kind: "add_chord_tone", request: <strict add params>}` and
+`{kind: "remove_chord_tone", request: <strict remove params>}`.
 These commands cannot be sequence steps. Execution is never automatically
 replayed; receipt lookup is a safe read that rechecks the original session after
 reconnect. Unknown/read-only/other mutation kinds are rejected before native

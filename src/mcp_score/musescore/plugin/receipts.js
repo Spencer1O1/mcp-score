@@ -22,7 +22,7 @@ function newState() {
 
 function capabilities(plugin) {
     return {protocolVersion: receiptVersion, pluginSession: plugin.receiptState.sessionId,
-        supportedMutations: ["setNotePitch", "setNotePitches"], capacity: capacity,
+        supportedMutations: ["setNotePitch", "setNotePitches", "addChordTone", "removeChordTone"], capacity: capacity,
         maxPayloadUnits: maxPayloadUnits, maxReplyUnits: maxReplyUnits,
         maxDepth: maxDepth, maxNodes: maxNodes, retention: "plugin_session_non_evicting"};
 }
@@ -131,9 +131,11 @@ function executeMutationOnce(plugin, params) {
         return failure(params, "unsupported_receipted_mutation", "An explicit supported guarded mutation is required");
     }
     var command = mutation.kind === "set_note_pitch" ? "setNotePitch"
-        : (mutation.kind === "set_note_pitches" ? "setNotePitches" : null);
+        : (mutation.kind === "set_note_pitches" ? "setNotePitches"
+        : (mutation.kind === "add_chord_tone" ? "addChordTone"
+        : (mutation.kind === "remove_chord_tone" ? "removeChordTone" : null)));
     if (command === null || !Object.prototype.hasOwnProperty.call(plugin.commands, command)) {
-        return failure(params, "unsupported_receipted_mutation", "Only guarded pitch and distinct-chord pitch batches are supported");
+        return failure(params, "unsupported_receipted_mutation", "Only explicit guarded pitch or chord-tone mutations are supported");
     }
     var payload;
     try { payload = canonical({command: command, params: mutation.request}, maxPayloadUnits); }
