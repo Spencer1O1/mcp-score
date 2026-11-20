@@ -347,6 +347,65 @@ verified mutation results.
 | ------- | ------ | ------------------------------------------------------------- |
 | `undo`  | none   | Undo the last action; reports the cursor position afterwards. |
 
+### Guarded duration shortening
+
+`setEventDuration` is a top-level mutation (never a sequence action or a replay-safe
+command). Parameters are `{measure, staff, voice, offset, duration, policy,
+expected}`. Measures are ordinal and 1-indexed; staff/voice are zero-based and
+fractions use whole notes. `policy` must be `shorten_fill_rest`. `expected` must
+contain **every event** in a fresh complete read of that measure filtered to the
+explicit staff and voice, including annotations. Neighbor pitch/spelling,
+rhythm, lyrics and articulations in that voice are checked atomically before
+opening the undo command. Snapshot scope is that voice measure, not a score
+instance or application revision; identical contents in another score remain
+indistinguishable.
+
+This first duration slice uses the actual native `DurationElement.duration`
+setter, which calls `Score::changeCRlen`; it never deletes/reinserts a note as a
+fallback. The setter was added in 4.6, but this operation requires actual
+**MuseScore 4.7+ in major version 4** because complete score-spanner enumeration
+was added in 4.7. The handler checks native application version and metadata,
+not the bridge package version. 4.4 and 4.6 reject before any undo command.
+
+Only ordinary pitched chords with equal notated/elapsed durations may shorten
+within one measure. Original and replacement durations must be undotted whole,
+half, quarter, eighth, 16th or 32nd notes. Equal durations return `unchanged`
+without history; larger durations reject. Target ties, tuplets, grace notes,
+beams, tremolos, arpeggios, cross-staffing, drum/tab staves, microtonality,
+lyrics, articulations and other attached child elements reject. Missing native
+eligibility metadata also rejects. This prevents attachment loss rather than
+claiming that arbitrary notation survives native rewriting.
+
+Spanners with unknown time/track metadata reject. A spanner whose closed time
+interval intersects the original chord interval rejects, conservatively across
+all staves. A known distant spanner is allowed; all enumerated spanner type,
+start, length, tracks and anchor values must survive unchanged. Native
+`spannerTicks` is a **length**, despite the API header's end-tick description.
+
+Read-back traverses the entire measure and re-resolves events after native
+rewriting. It verifies the shortened chord's pitch/spelling, contiguous rest
+coverage through the original end, and unchanged exposed events on every track
+(including neighboring lyric/articulation metadata). Responses return actual
+all-track `before`/`after` events and `verified: true` only after checks both
+inside the undo scope and after commit. This verifies exposed event data, not
+every engraving property. Native cancellation is attempted only while this
+operation's undo scope is known open; `rolled_back` requires a matching reread.
+A failed verification after commit reports `applied_unverified`; no global undo
+is attempted. Inspect failed outcomes before retrying.
+
+Native rewriting may deselect items and change layout. The logical cursor is
+untouched, but selection is **not restored**: applied results report
+`selectionStatus: "not_preserved"`; no-ops report `"unchanged"`. This operation
+does not claim UI/viewport preservation.
+
+Native API evidence:
+[duration wrapper and setter](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/elements.cpp),
+[native shortening implementation](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/editing/cmd.cpp),
+[spanner property semantics](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/dom/spanner.cpp).
+The isolated native fixture checks shortening/rest fill, chord/transposing
+spelling, untouched neighbors, rejection and undo; older-version jobs exercise
+explicit rejection rather than skipping their duration phase.
+
 ### Batch operations
 
 | Command           | Params                                | Description                                                                                                                                                                                                                                                                                                                          |

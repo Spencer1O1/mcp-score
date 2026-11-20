@@ -21,6 +21,7 @@ from mcp_score.bridge.capabilities import (
     MuseScoreDiagnostics,
     PluginCapabilities,
 )
+from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
 from mcp_score.bridge.results import (
@@ -72,6 +73,7 @@ class MuseScoreCommand(StrEnum):
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
     SET_NOTE_PITCH = "setNotePitch"
+    SET_EVENT_DURATION = "setEventDuration"
     ADD_REHEARSAL_MARK = "addRehearsalMark"
     ADD_CHORD_SYMBOL = "addChordSymbol"
     ADD_DYNAMIC = "addDynamic"
@@ -285,6 +287,31 @@ class MuseScoreBridge(WebSocketBridge):
         )
 
     # ── Writing ─────────────────────────────────────────────────────
+
+    async def set_event_duration(
+        self,
+        measure: int,
+        staff: int,
+        voice: int,
+        offset: Duration,
+        duration: Duration,
+        expected: list[ExpectedDurationEvent],
+    ) -> DurationEdit:
+        return await self._run(
+            DurationEdit,
+            MuseScoreCommand.SET_EVENT_DURATION,
+            {
+                "measure": measure,
+                "staff": staff,
+                "voice": voice,
+                "offset": offset.model_dump(),
+                "duration": duration.model_dump(),
+                "policy": "shorten_fill_rest",
+                "expected": [
+                    _camel_case_keys(event.model_dump()) for event in expected
+                ],
+            },
+        )
 
     async def set_note_pitch(
         self,
