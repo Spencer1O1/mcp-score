@@ -6,7 +6,45 @@ from typing import Literal
 
 from mcp_score.bridge.results import Duration, Result, TimeSignature
 
-__all__ = ["Passage", "PassageEvent", "PassageMeasure", "PassageNote"]
+__all__ = [
+    "Passage",
+    "PassageArticulation",
+    "PassageEvent",
+    "PassageLyric",
+    "PassageMeasure",
+    "PassageNote",
+]
+
+
+class PassageArticulation(Result):
+    """A native chord articulation; null fields are unavailable."""
+
+    symbol: int | None
+    """Native SymId code, scoped to the application's version, not an event ID."""
+    name: str | None
+    """Native localized subtype name; not a stable machine-readable identifier."""
+    placement: int | None
+    """Native placement property, not the final geometric engraving position."""
+    placement_name: Literal["ABOVE", "BELOW"] | None
+    anchor: int | None
+    """Native articulation-anchor enum code, where available."""
+    direction: int | None
+    """Native direction enum code, where available."""
+
+
+class PassageLyric(Result):
+    """One native lyric attached to a chord/rest; null fields are unavailable."""
+
+    text: str | None
+    """Native text, including any MuseScore rich-text markup; not normalized."""
+    verse: int | None
+    """Native zero-based verse index, not a displayed verse label."""
+    syllabic: int | None
+    """Native syllabic enum code, retained even when its name is unknown."""
+    syllabic_name: Literal["SINGLE", "BEGIN", "END", "MIDDLE"] | None
+    placement: int | None
+    """Native placement enum code, not a geometric layout coordinate."""
+    placement_name: Literal["ABOVE", "BELOW"] | None
 
 
 class PassageNote(Result):
@@ -42,6 +80,18 @@ class PassageEvent(Result):
     notes: list[PassageNote]
     text: str | None = None
     """Text of an annotation, where exposed by MuseScore."""
+    lyrics: list[PassageLyric] | None = None
+    """Native chord/rest lyrics; [] means none, null means unavailable/inapplicable.
+
+    Defaults to null for payloads from older plugins. Native ordering is retained;
+    neither this order nor the verse index is a persistent lyric identifier.
+    """
+    articulations: list[PassageArticulation] | None = None
+    """Chord articulations; [] means none, null means unavailable/inapplicable.
+
+    The native list is exposed starting with MuseScore 4.6. Older payloads and
+    native wrappers remain null, rather than claiming there are no articulations.
+    """
 
 
 class PassageMeasure(Result):

@@ -86,12 +86,46 @@ rest spans the actual measure length. Concert names use sounding MIDI pitch and
 concert TPC even when MuseScore displays transposed notation; `displayed_tpc`
 reports the current display spelling separately.
 
+Chord/rest `lyrics` preserve the native text, zero-based `verse`, syllabic code
+and symbolic name (`SINGLE`, `BEGIN`, `END`, `MIDDLE`), and placement code/name
+(`ABOVE`, `BELOW`). Native text may contain MuseScore rich-text markup; it is
+not converted to plain text. The verse index is not a displayed verse label.
+
+Chord `articulations` expose the native symbol ID, localized subtype name,
+placement code/name, and native anchor/direction codes where available. The
+symbol ID belongs to the installed MuseScore version; the localized name is
+for display, not a stable identifier. Placement is the native property, not the
+final engraving coordinate. This list requires MuseScore's native
+`Chord.articulations` getter, introduced in 4.6. On older wrappers it is `null`,
+even when a visible articulation exists. Generic note-attached symbols and
+fingerings are not inferred to be articulations.
+
+For both attachment lists, `[]` means the native list was read and is empty;
+`null` means unavailable or inapplicable (including payloads from older bridge
+plugins). Individual unavailable properties remain `null`; unknown enum codes
+are preserved with a `null` symbolic name. Attachment order and verse indices
+are scoped to the current read, not persistent identifiers.
+
 `range_complete` confirms traversal of the requested rhythmic range, not full
 notation fidelity. The `unsupported` field lists missing details, including grace
-notes, ties and spanner endpoints, attached lyrics and articulations, written
-pitch octaves for transposing instruments, and effective instrument, clef, key,
-and tempo context. Opaque non-rhythmic segment elements report their type and
-text where available.
+notes, ties and spanner endpoints, lyric melisma endpoints, displayed verse
+labels and rich-text interpretation, articulations when the native getter is
+unavailable, note-attached symbols/fingerings, written pitch octaves for
+transposing instruments, tuplet grouping, measure-attached elements outside
+segments, system annotations without staff assignments, and effective
+instrument, clef, key, and tempo context. Opaque non-rhythmic segment elements
+report their type and text where available. Dynamics and chord symbols remain
+opaque segment annotations; their notation-specific semantics are not decoded.
+
+The supported native attachment routes are verified against the versioned
+`src/engraving/api/v1/elements.h` wrappers in
+[MuseScore 4.4.4](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/elements.h),
+[4.6.2](https://github.com/musescore/MuseScore/blob/v4.6.2/src/engraving/api/v1/elements.h),
+and [4.7.5](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/elements.h).
+`ChordRest.lyrics` is present in each; `Chord.articulations` is absent in the
+oldest wrapper. Reads detect the actual properties instead of guessing based
+on the version. They never export a score or change selection to discover
+attachments.
 
 Reads reject ranges exceeding the plugin's measure or event limits instead of
 returning a truncated passage. Request smaller ranges after such an error.

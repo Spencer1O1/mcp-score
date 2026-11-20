@@ -38,6 +38,10 @@ async def read_passage(
     across all requested staves and voices, including unsaved changes. Does
     not move the selection or the bridge's logical cursor. Other segment
     elements and annotations include their type and text where available.
+    Chord/rest lyrics include native text, zero-based verse, syllabic and
+    placement codes/names; null means unavailable, [] means no attached lyrics.
+    Chord articulations include native symbol IDs and localized names where
+    supported (MuseScore 4.6+); older wrappers report null, not an empty list.
     The result lists notation details not yet serialized in `unsupported`;
     `range_complete` describes traversal, not full notation fidelity.
     Oversize reads fail without returning a truncated passage; request a

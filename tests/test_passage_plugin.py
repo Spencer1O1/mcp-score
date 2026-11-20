@@ -162,3 +162,109 @@ def test_pitch_names_preserve_enharmonic_octaves_and_doubled_accidentals() -> No
         "concertName(62,28),concertName(62,4)]));"
     )
     assert names == ["B#3", "Cb4", "C##4", "Ebb4"]
+
+
+def test_lyrics_preserve_native_fields_per_voice_and_read_without_writes() -> None:
+    reply = _execute(
+        "plugin.Lyrics={SINGLE:10,BEGIN:11,END:12,MIDDLE:13};"
+        "plugin.Placement={ABOVE:20,BELOW:21};"
+        "segments[0].elementAt(0).lyrics=["
+        "{text:'<b>Hel</b>',verse:0,syllabic:11,placement:21},"
+        "{text:'Deux & trois',verse:1,syllabic:10,placement:20}];"
+        "segments[1].elementAt(1).lyrics=["
+        "{text:'low',verse:2,syllabic:12,placement:20}];"
+        "segments[0].elementAt(4).lyrics=[];"
+        "plugin.curScore.startCmd=()=>{throw Error('undo mutation');};"
+        "plugin.curScore.newCursor=()=>{throw Error('cursor creation');};"
+        "Object.defineProperty(plugin.curScore,'selection',"
+        "{get:()=>{throw Error('selection accessed');}});"
+        "function freeze(value){if(value&&typeof value==='object'"
+        "&&!Object.isFrozen(value))"
+        "{Object.freeze(value);Object.values(value).forEach(freeze);}}"
+        "freeze(plugin);freeze(segments);"
+        "console.log(JSON.stringify(readPassage(plugin,{startMeasure:1,endMeasure:1})));"
+    )
+    passage = Passage.model_validate(_snake_case_keys(reply["result"]))
+    events = passage.measures[0].events
+    melody = next(event for event in events if event.staff == 0 and event.tick == 0)
+    assert melody.lyrics is not None
+    assert [(lyric.text, lyric.verse) for lyric in melody.lyrics] == [
+        ("<b>Hel</b>", 0),
+        ("Deux & trois", 1),
+    ]
+    assert melody.lyrics[0].syllabic == 11
+    assert melody.lyrics[0].syllabic_name == "BEGIN"
+    assert melody.lyrics[0].placement == 21
+    assert melody.lyrics[0].placement_name == "BELOW"
+    chord = next(event for event in events if event.voice == 1)
+    assert chord.lyrics is not None and chord.lyrics[0].text == "low"
+    assert chord.lyrics[0].syllabic_name == "END"
+    assert chord.lyrics[0].placement_name == "ABOVE"
+    rest = next(event for event in events if event.staff == 1)
+    assert rest.lyrics == []
+    unavailable = next(event for event in events if event.tick == 960)
+    assert unavailable.lyrics is None
+
+
+def test_lyrics_unknown_native_codes_and_missing_fields_are_not_fabricated() -> None:
+    reply = _execute(
+        "plugin.Lyrics={SINGLE:0};plugin.Placement={ABOVE:0};"
+        "segments[0].elementAt(0).lyrics=["
+        "{text:'mystery',verse:3,syllabic:99,placement:88},{}];"
+        "console.log(JSON.stringify(readPassage(plugin,{startMeasure:1,endMeasure:1})));"
+    )
+    passage = Passage.model_validate(_snake_case_keys(reply["result"]))
+    lyrics = passage.measures[0].events[0].lyrics
+    assert lyrics is not None
+    assert lyrics[0].syllabic == 99 and lyrics[0].syllabic_name is None
+    assert lyrics[0].placement == 88 and lyrics[0].placement_name is None
+    assert lyrics[1].model_dump() == {
+        "text": None,
+        "verse": None,
+        "syllabic": None,
+        "syllabic_name": None,
+        "placement": None,
+        "placement_name": None,
+    }
+
+
+def test_older_plugin_payload_keeps_lyrics_unavailable() -> None:
+    reply = _execute(
+        "const result=readPassage(plugin,{startMeasure:1,endMeasure:1}).result;"
+        "result.measures[0].events.forEach(event=>delete event.lyrics);"
+        "console.log(JSON.stringify(result));"
+    )
+    passage = Passage.model_validate(_snake_case_keys(reply))
+    assert all(event.lyrics is None for event in passage.measures[0].events)
+
+
+def test_articulations_use_native_list_and_keep_codes_and_localized_names() -> None:
+    reply = _execute(
+        "plugin.Placement={ABOVE:20,BELOW:21};"
+        "segments[0].elementAt(0).articulations=[{symbol:1234,"
+        "subtypeName:()=> 'Staccato (localized)',placement:20,"
+        "articulationAnchor:4,direction:1},"
+        "{symbol:9999,placement:88}];"
+        "segments[1].elementAt(1).articulations=[];"
+        "console.log(JSON.stringify(readPassage(plugin,{startMeasure:1,endMeasure:1})));"
+    )
+    passage = Passage.model_validate(_snake_case_keys(reply["result"]))
+    events = passage.measures[0].events
+    articulations = events[0].articulations
+    assert articulations is not None
+    assert articulations[0].model_dump() == {
+        "symbol": 1234,
+        "name": "Staccato (localized)",
+        "placement": 20,
+        "placement_name": "ABOVE",
+        "anchor": 4,
+        "direction": 1,
+    }
+    assert articulations[1].symbol == 9999
+    assert articulations[1].placement == 88
+    assert articulations[1].placement_name is None
+    assert articulations[1].name is None and articulations[1].anchor is None
+    chord = next(event for event in events if event.voice == 1)
+    assert chord.articulations == []
+    assert next(event for event in events if event.tick == 960).articulations is None
+    assert next(event for event in events if event.staff == 1).articulations is None

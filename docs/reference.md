@@ -145,6 +145,10 @@ Returns chords, rests, concert pitch names, exact offsets and durations
 across all requested staves and voices, including unsaved changes. Does
 not move the selection or the bridge's logical cursor. Other segment
 elements and annotations include their type and text where available.
+Chord/rest lyrics include native text, zero-based verse, syllabic and
+placement codes/names; null means unavailable, [] means no attached lyrics.
+Chord articulations include native symbol IDs and localized names where
+supported (MuseScore 4.6+); older wrappers report null, not an empty list.
 The result lists notation details not yet serialized in `unsupported`;
 `range_complete` describes traversal, not full notation fidelity.
 Oversize reads fail without returning a truncated passage; request a
@@ -657,22 +661,56 @@ Negotiated plugin capabilities and the Python server's package version.
 | `start_staff` | `int` | First staff of the part (0-indexed).           |
 | `end_staff`   | `int` | Last staff of the part (0-indexed, inclusive). |
 
+### `PassageArticulation`
+
+A native chord articulation; null fields are unavailable.
+
+| Field            | Type                         | Description                                                              |
+| ---------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| `symbol`         | `int \| None`                | Native SymId code, scoped to the application's version, not an event ID. |
+| `name`           | `str \| None`                | Native localized subtype name; not a stable machine-readable identifier. |
+| `placement`      | `int \| None`                | Native placement property, not the final geometric engraving position.   |
+| `placement_name` | `"ABOVE" \| "BELOW" \| None` |                                                                          |
+| `anchor`         | `int \| None`                | Native articulation-anchor enum code, where available.                   |
+| `direction`      | `int \| None`                | Native direction enum code, where available.                             |
+
 ### `PassageEvent`
 
 An element at an exact position in the live score.
 
-| Field             | Type                           | Description                                                          |
-| ----------------- | ------------------------------ | -------------------------------------------------------------------- |
-| `kind`            | `"chord" \| "rest" \| "other"` |                                                                      |
-| `type`            | `int`                          | MuseScore's element type code.                                       |
-| `staff`           | `int`                          | Staff index, starting at zero.                                       |
-| `voice`           | `int`                          | Voice index, starting at zero.                                       |
-| `tick`            | `int`                          |                                                                      |
-| `offset`          | `Duration`                     | Exact offset from the measure start, as a fraction of a whole note.  |
-| `duration`        | `Duration \| None`             | Notated length, including dots; null for non-rhythmic elements.      |
-| `actual_duration` | `Duration \| None`             | Elapsed score time, including tuplet scaling; null when unavailable. |
-| `notes`           | `list[PassageNote]`            |                                                                      |
-| `text`            | `str \| None`                  | Text of an annotation, where exposed by MuseScore.                   |
+| Field             | Type                           | Description                                                                   |
+| ----------------- | ------------------------------ | ----------------------------------------------------------------------------- |
+| `kind`            | `"chord" \| "rest" \| "other"` |                                                                               |
+| `type`            | `int`                          | MuseScore's element type code.                                                |
+| `staff`           | `int`                          | Staff index, starting at zero.                                                |
+| `voice`           | `int`                          | Voice index, starting at zero.                                                |
+| `tick`            | `int`                          |                                                                               |
+| `offset`          | `Duration`                     | Exact offset from the measure start, as a fraction of a whole note.           |
+| `duration`        | `Duration \| None`             | Notated length, including dots; null for non-rhythmic elements.               |
+| `actual_duration` | `Duration \| None`             | Elapsed score time, including tuplet scaling; null when unavailable.          |
+| `notes`           | `list[PassageNote]`            |                                                                               |
+| `text`            | `str \| None`                  | Text of an annotation, where exposed by MuseScore.                            |
+| `lyrics`          | `list[PassageLyric] \| None`   | Native chord/rest lyrics; [] means none, null means unavailable/inapplicable. |
+
+Defaults to null for payloads from older plugins. Native ordering is retained;
+neither this order nor the verse index is a persistent lyric identifier. |
+| `articulations` | `list[PassageArticulation] \| None` | Chord articulations; [] means none, null means unavailable/inapplicable.
+
+The native list is exposed starting with MuseScore 4.6. Older payloads and
+native wrappers remain null, rather than claiming there are no articulations. |
+
+### `PassageLyric`
+
+One native lyric attached to a chord/rest; null fields are unavailable.
+
+| Field            | Type                                               | Description                                                            |
+| ---------------- | -------------------------------------------------- | ---------------------------------------------------------------------- |
+| `text`           | `str \| None`                                      | Native text, including any MuseScore rich-text markup; not normalized. |
+| `verse`          | `int \| None`                                      | Native zero-based verse index, not a displayed verse label.            |
+| `syllabic`       | `int \| None`                                      | Native syllabic enum code, retained even when its name is unknown.     |
+| `syllabic_name`  | `"SINGLE" \| "BEGIN" \| "END" \| "MIDDLE" \| None` |                                                                        |
+| `placement`      | `int \| None`                                      | Native placement enum code, not a geometric layout coordinate.         |
+| `placement_name` | `"ABOVE" \| "BELOW" \| None`                       |                                                                        |
 
 ### `PassageMeasure`
 

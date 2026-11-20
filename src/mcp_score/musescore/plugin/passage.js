@@ -12,7 +12,9 @@ var unsupportedNotation = [
     "written pitch and octave for transposing instruments (concert pitch is returned)",
     "grace-note contents",
     "tie and spanner endpoints",
-    "articulations and lyrics attached to chords or notes",
+    "chord articulations when the native list is unavailable (null, before MuseScore 4.6)",
+    "note-attached symbols, fingerings and other non-articulation child elements",
+    "lyric melisma endpoints, displayed verse labels and rich-text interpretation",
     "tuplet grouping (notated and elapsed durations are returned)",
     "effective instrument, clef, key and tempo context",
     "displayed measure numbering and persistent event identifiers",
@@ -59,6 +61,55 @@ function concertName(pitch, tpc) {
     return letters[index] + suffix + octave;
 }
 
+function enumName(values, names, value) {
+    if (!values || !integer(value)) return null;
+    for (var index = 0; index < names.length; index++) {
+        if (values[names[index]] === value) return names[index];
+    }
+    return null;
+}
+
+// ChordRest.lyrics is a native read-only list on supported MuseScore versions.
+// Missing metadata stays null; unknown enum values keep their native code.
+function describeLyrics(plugin, element) {
+    if (!element.lyrics || !integer(element.lyrics.length)) return null;
+    var lyrics = [];
+    for (var index = 0; index < element.lyrics.length; index++) {
+        var lyric = element.lyrics[index];
+        lyrics.push({
+            text: typeof lyric.text === "string" ? lyric.text : null,
+            verse: integer(lyric.verse) ? lyric.verse : null,
+            syllabic: integer(lyric.syllabic) ? lyric.syllabic : null,
+            syllabicName: enumName(plugin.Lyrics,
+                                  ["SINGLE", "BEGIN", "END", "MIDDLE"], lyric.syllabic),
+            placement: integer(lyric.placement) ? lyric.placement : null,
+            placementName: enumName(plugin.Placement, ["ABOVE", "BELOW"], lyric.placement)
+        });
+    }
+    return lyrics;
+}
+
+// Chord.articulations was added to the native wrapper in MuseScore 4.6.
+function describeArticulations(plugin, element) {
+    if (!element.articulations || !integer(element.articulations.length)) return null;
+    var articulations = [];
+    for (var index = 0; index < element.articulations.length; index++) {
+        var articulation = element.articulations[index];
+        articulations.push({
+            symbol: integer(articulation.symbol) ? articulation.symbol : null,
+            name: typeof articulation.subtypeName === "function"
+                ? articulation.subtypeName() : null,
+            placement: integer(articulation.placement) ? articulation.placement : null,
+            placementName: enumName(plugin.Placement, ["ABOVE", "BELOW"],
+                                    articulation.placement),
+            anchor: integer(articulation.articulationAnchor)
+                ? articulation.articulationAnchor : null,
+            direction: integer(articulation.direction) ? articulation.direction : null
+        });
+    }
+    return articulations;
+}
+
 function describeEvent(plugin, element, staff, voice, tick, measureTick) {
     var isChord = element.type === plugin.Element.CHORD;
     var isRest = element.type === plugin.Element.REST;
@@ -85,7 +136,9 @@ function describeEvent(plugin, element, staff, voice, tick, measureTick) {
         duration: rhythmic ? duration(element.duration) : null,
         actualDuration: rhythmic ? duration(element.actualDuration) : null,
         notes: notes,
-        text: typeof element.text === "string" ? element.text : null
+        text: typeof element.text === "string" ? element.text : null,
+        lyrics: rhythmic ? describeLyrics(plugin, element) : null,
+        articulations: isChord ? describeArticulations(plugin, element) : null
     };
 }
 
