@@ -129,6 +129,16 @@ jobs:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
 
+      - name: Start disposable staff-context fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/staff-context.musicxml
+
+      - name: Native staff-context tests (including older API partial results)
+        env:
+          MCP_SCORE_CONTEXT_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_context.py -v
+
       - name: Stop only owned MuseScore and display processes
         if: always()
         run: uv run scripts/musescore_harness.py stop
@@ -240,6 +250,16 @@ jobs:
         env:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
+
+      - name: Start disposable staff-context fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/staff-context.musicxml
+
+      - name: Native staff-context tests (including older API partial results)
+        env:
+          MCP_SCORE_CONTEXT_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_context.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()
@@ -354,6 +374,16 @@ jobs:
         env:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
+
+      - name: Start disposable staff-context fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/staff-context.musicxml
+
+      - name: Native staff-context tests (including older API partial results)
+        env:
+          MCP_SCORE_CONTEXT_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_context.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()
