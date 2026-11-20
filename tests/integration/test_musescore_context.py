@@ -47,7 +47,10 @@ async def test_native_inherited_midmeasure_pickup_irregular_and_transposition() 
             point
             for point in flute.changes
             if point.instrument is not None
-            and "oboe" in (point.instrument.long_name or "").lower()
+            and point.instrument.instrument_id != flute.start.instrument.instrument_id
+        )
+        assert (
+            change.instrument is not None and change.instrument.instrument_id == "oboe"
         )
         assert change.measure == 2 and change.tick == 960
         assert change.offset == Duration(numerator=1, denominator=4)
@@ -106,9 +109,10 @@ async def test_context_reads_preserve_selection_cursor_contents_and_undo() -> No
         baseline = await bridge.read_passage(1, 3)
         await bridge.select_range(2, 2, 0, 0)
         await bridge.transpose(1)
-        needs_undo = True
         changed = await bridge.read_passage(1, 3)
         assert changed != baseline
+        # A successful legacy reply alone does not prove an undoable edit.
+        needs_undo = True
         selection = await bridge.read_current_selection()
         cursor = await bridge.get_cursor_info()
         await bridge.read_staff_context(1, 3)

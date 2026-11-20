@@ -5,7 +5,7 @@
   </work>
   <part-list>
     <score-part id="P1">
-      <part-name>Flute and oboe</part-name>
+      <part-name>Flute</part-name>
       <score-instrument id="IF">
         <instrument-name>Flute</instrument-name>
       </score-instrument>
