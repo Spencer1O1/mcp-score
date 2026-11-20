@@ -38,13 +38,18 @@ import platform
 import plistlib
 import shutil
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.request
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any
 
 import psutil
@@ -61,6 +66,7 @@ __all__ = [
     "Layout",
     "Settings",
     "clean",
+    "capture_startup_diagnostics",
     "collect_logs",
     "install",
     "latest_version",
@@ -94,6 +100,11 @@ STARTUP_SECONDS = 45.0
 LAUNCH_ATTEMPTS = 2
 DIALOG_DISMISS_SECONDS = 2.0
 LOG_TAIL_LINES = 40
+STARTUP_DIAGNOSTICS_FILE = "startup-diagnostics.json"
+STARTUP_DIAGNOSTICS_BYTES = 65536
+STARTUP_UI_BYTES = 32768
+STARTUP_UI_SECONDS = 3.0
+STARTUP_UI_HELPER = REPOSITORY_ROOT / "scripts/macos_startup_probe.py"
 
 # MuseScore identifies a plugin by its QML file's path under the plugins
 # directory (ExtPluginsLoader::makeUri).
@@ -1122,11 +1133,15 @@ def start_xvfb(settings: Settings) -> None:
         time.sleep(PROCESS_POLL_SECONDS)
 
 
-def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
+def launch(
+    settings: Settings, score: Path, diagnostics: StartupDiagnostics | None = None
+) -> subprocess.Popen[bytes]:
     """Launch in the declared boundary and record ownership before waiting."""
     if os.environ.get("MUSESCORE_LYRIC_TEST_SETUP") == "1":
         _install_lyric_fixture(settings.layout)
     for attempt in range(1, LAUNCH_ATTEMPTS + 1):
+        if diagnostics:
+            diagnostics.begin_attempt(attempt)
         process = _start(settings, score)
         expected_executable = (
             settings.executable.parent / "bin/mscore4portable"
@@ -1134,12 +1149,19 @@ def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
             else settings.executable
         )
         track_process(settings.layout, process, "musescore", expected_executable)
+        if diagnostics:
+            diagnostics.attempt(attempt, process, "started")
         deadline = time.monotonic() + STARTUP_SECONDS
         while process.poll() is None and time.monotonic() < deadline:
             refresh_owned(settings.layout)
             time.sleep(PROCESS_POLL_SECONDS)
         if process.poll() is None:
+            if diagnostics:
+                diagnostics.attempt(attempt, process, "running")
             return process
+        if diagnostics:
+            # _start truncates stdout; retain this attempt before retrying.
+            diagnostics.attempt(attempt, process, "exited")
         logger.warning("MuseScore exited during startup (attempt %d)", attempt)
     print_log_tails(settings.layout)
     raise HarnessError("MuseScore exited during startup")
@@ -1445,6 +1467,498 @@ def verify_windows_portable_binary(settings: Settings) -> None:
         raise HarnessError("Refusing a Windows binary without WIN_PORTABLE data paths")
 
 
+def validate_startup_diagnostic_paths(layout: Layout) -> None:
+    """Read existing ownership only; never adopt or repair a diagnostic root."""
+    validate_artifact_boundary(layout)
+    lock = layout.root.parent / f".{layout.root.name}.harness.lock"
+    if any(
+        component.is_symlink() or component.is_junction()
+        for component in (lock, *lock.parents)
+    ):
+        raise HarnessError("Linked startup diagnostic operation lock")
+    for path in (
+        layout.root / PROFILE_MARKER,
+        layout.state_file,
+        layout.state_file.with_suffix(".tmp"),
+        layout.root / STARTUP_DIAGNOSTICS_FILE,
+        layout.stdout_log,
+        layout.preferences.file,
+        layout.data_dir,
+        layout.data_dir / "extensions/config.json",
+        layout.plugins_dir,
+        *(layout.root / name for name in PATH_PREFERENCES),
+    ):
+        if not unlinked_log_source(path, layout.root):
+            raise HarnessError("Linked startup diagnostic root, marker or control path")
+        if any(component.is_junction() for component in (path, *path.parents)):
+            raise HarnessError("Junction in startup diagnostic control ancestry")
+    marker = layout.root / PROFILE_MARKER
+    for path in (
+        marker,
+        layout.state_file,
+        layout.root / STARTUP_DIAGNOSTICS_FILE,
+        layout.stdout_log,
+    ):
+        if path.exists() and not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
+            raise HarnessError("Non-regular startup diagnostic control file")
+    if (
+        layout.state_file.exists()
+        and layout.state_file.stat().st_size > STARTUP_DIAGNOSTICS_BYTES
+    ):
+        raise HarnessError("Startup process ownership record exceeds its size bound")
+    if not marker.is_file():
+        raise HarnessError("Startup diagnostics require an existing marked owned root")
+    with marker.open("rb") as stream:
+        if (
+            stream.read(len(PROFILE_MARKER_CONTENT) + 1)
+            != PROFILE_MARKER_CONTENT.encode()
+        ):
+            raise HarnessError(
+                "Startup diagnostics require an existing marked owned root"
+            )
+
+
+def write_startup_diagnostics(layout: Layout, report: dict[str, Any]) -> None:
+    """Bound the document before an exclusive temporary write and atomic replace."""
+    validate_startup_diagnostic_paths(layout)
+    payload = json.dumps(report, ensure_ascii=True, allow_nan=False).encode()
+    if len(payload) > STARTUP_DIAGNOSTICS_BYTES:
+        raise HarnessError("Startup diagnostic report exceeds its size bound")
+    if os.name != "nt":
+        root_descriptor = os.open(
+            layout.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        temporary_name = ".startup-diagnostics-" + uuid.uuid4().hex + ".tmp"
+        try:
+            with os.fdopen(
+                os.open(
+                    temporary_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=root_descriptor,
+                ),
+                "wb",
+            ) as stream:
+                stream.write(payload)
+                stream.flush()
+            validate_startup_diagnostic_paths(layout)
+            current = layout.root.stat(follow_symlinks=False)
+            original = os.fstat(root_descriptor)
+            if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+                raise HarnessError("Startup diagnostic root identity changed")
+            os.rename(
+                temporary_name,
+                STARTUP_DIAGNOSTICS_FILE,
+                src_dir_fd=root_descriptor,
+                dst_dir_fd=root_descriptor,
+            )
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary_name, dir_fd=root_descriptor)
+            os.close(root_descriptor)
+        return
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=".startup-diagnostics-",
+            suffix=".tmp",
+            dir=layout.root,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            identity = os.fstat(stream.fileno())
+        validate_startup_diagnostic_paths(layout)
+        current = temporary.stat(follow_symlinks=False)
+        if temporary.is_symlink() or (current.st_dev, current.st_ino) != (
+            identity.st_dev,
+            identity.st_ino,
+        ):
+            raise HarnessError("Diagnostic temporary file identity changed")
+        temporary.replace(layout.root / STARTUP_DIAGNOSTICS_FILE)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def startup_process_status(layout: Layout) -> list[dict[str, Any]]:
+    """Report only recorded identities; never enumerate/adopt other processes."""
+    records = read_owned(layout)
+    statuses = []
+    for identity in records[:32]:
+        status: dict[str, Any] = {"pid": identity.pid, "ownership": "unavailable"}
+        try:
+            process = matching_process(identity)
+            if process is None:
+                status["ownership"] = "exited_or_identity_changed"
+            else:
+                status.update(
+                    asdict(identity), ownership="verified", status=process.status()
+                )
+                # Do not publish observations from an identity that changed mid-query.
+                if matching_process(identity) is None:
+                    status = {"pid": identity.pid, "ownership": "identity_changed"}
+        except (HarnessError, psutil.Error) as error:
+            status["reason"] = type(error).__name__
+        statuses.append(status)
+    if len(records) > 32:
+        statuses.append(
+            {"ownership": "truncated", "omitted_records": len(records) - 32}
+        )
+    return statuses
+
+
+def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
+    """A fixed helper, capped output and deadline; only this child may be killed."""
+    payload = json.dumps(request).encode()
+    if len(payload) > 8192:
+        return {"status": "request_limit", "windows": []}
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(STARTUP_UI_HELPER)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+    except OSError as error:
+        return {
+            "status": "helper_failed",
+            "reason": type(error).__name__,
+            "windows": [],
+        }
+    assert process.stdin is not None and process.stdout is not None
+    output: Queue[bytes | OSError] = Queue(maxsize=1)
+    input_finished: Queue[OSError | None] = Queue(maxsize=1)
+
+    def write_input() -> None:
+        failure = None
+        try:
+            remaining = memoryview(payload)
+            while remaining:
+                written = os.write(process.stdin.fileno(), remaining)
+                if written <= 0:
+                    raise OSError("Helper stdin transfer made no progress")
+                remaining = remaining[written:]
+        except OSError as error:
+            failure = error
+        finally:
+            # This thread alone closes stdin. It is unbuffered, so closing can
+            # never flush unwritten bytes or contend with the parent's cleanup.
+            try:
+                process.stdin.close()
+            except OSError as error:
+                failure = failure or error
+            input_finished.put(failure)
+
+    def read_output() -> None:
+        try:
+            raw = bytearray()
+            while len(raw) <= STARTUP_UI_BYTES:
+                chunk = os.read(
+                    process.stdout.fileno(), min(4096, STARTUP_UI_BYTES + 1 - len(raw))
+                )
+                if not chunk:
+                    break
+                raw.extend(chunk)
+            output.put(bytes(raw))
+        except OSError as error:
+            output.put(error)
+        finally:
+            with contextlib.suppress(OSError):
+                process.stdout.close()
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    writer = threading.Thread(target=write_input, daemon=True)
+    deadline = time.monotonic() + STARTUP_UI_SECONDS
+    reader.start()
+    writer.start()
+    try:
+        try:
+            raw = output.get(timeout=max(0.01, deadline - time.monotonic()))
+        except Empty:
+            return {"status": "timeout", "windows": []}
+        if isinstance(raw, OSError):
+            return {
+                "status": "helper_failed",
+                "reason": type(raw).__name__,
+                "windows": [],
+            }
+        if len(raw) > STARTUP_UI_BYTES:
+            return {"status": "output_limit", "windows": []}
+        try:
+            code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "windows": []}
+        if code:
+            return {"status": "helper_failed", "exit_code": code, "windows": []}
+        try:
+            input_error = input_finished.get(
+                timeout=max(0.01, deadline - time.monotonic())
+            )
+        except Empty:
+            return {"status": "timeout", "windows": []}
+        if input_error is not None:
+            return {
+                "status": "helper_failed",
+                "reason": type(input_error).__name__,
+                "windows": [],
+            }
+        try:
+            result = json.loads(raw)
+            if (
+                not isinstance(result, dict)
+                or set(result) - {"status", "reason", "windows", "truncated"}
+                or result.get("status")
+                not in {
+                    "captured",
+                    "no_windows",
+                    "permission_denied",
+                    "identity_changed",
+                    "unavailable",
+                }
+                or not isinstance(result.get("windows"), list)
+                or len(result["windows"]) > 6
+                or any(
+                    not _valid_startup_window(window, request["identity"]["pid"])
+                    for window in result["windows"]
+                )
+                or (result["status"] != "captured" and result["windows"])
+                or (result["status"] == "captured" and not result["windows"])
+                or (
+                    "reason" in result
+                    and (
+                        not isinstance(result["reason"], str)
+                        or len(result["reason"]) > 256
+                    )
+                )
+                or ("truncated" in result and not isinstance(result["truncated"], bool))
+            ):
+                raise ValueError("Invalid window probe result")
+            return result
+        except ValueError, TypeError, KeyError, RecursionError:
+            return {"status": "malformed_output", "windows": []}
+    except (OSError, ValueError) as error:
+        return {
+            "status": "helper_failed",
+            "reason": type(error).__name__,
+            "windows": [],
+        }
+    finally:
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            logger.warning("Diagnostic helper did not exit after its deadline")
+        reader.join(timeout=0.1)
+        writer.join(timeout=0.1)
+        if reader.is_alive() or writer.is_alive():
+            logger.warning(
+                "Diagnostic helper pipe transfer did not finish after cleanup"
+            )
+
+
+def _valid_startup_window(window: Any, pid: int, *, sheet: bool = False) -> bool:
+    if not isinstance(window, dict) or window.get("pid") != pid:
+        return False
+    attributes = {"title", "role", "subrole", "modal"}
+    allowed = attributes | {"pid"}
+    if not sheet:
+        allowed |= {"sheets", "sheets_status", "sheets_truncated"}
+    if set(window) - allowed or not attributes.issubset(window):
+        return False
+    for name in attributes:
+        value = window[name]
+        if isinstance(value, str) and len(value) <= 256:
+            continue
+        if name == "modal" and isinstance(value, bool):
+            continue
+        if (
+            not isinstance(value, dict)
+            or value.get("status")
+            not in {
+                "unavailable",
+                "unsupported_type",
+                "encoding_unavailable",
+                "truncated",
+            }
+            or set(value) - {"status", "value", "ax_error"}
+        ):
+            return False
+        if "value" in value and (
+            not isinstance(value["value"], str) or len(value["value"]) > 256
+        ):
+            return False
+        if "ax_error" in value and (type(value["ax_error"]) is not int):
+            return False
+    if "sheets_status" in window and (
+        not isinstance(window["sheets_status"], str)
+        or len(window["sheets_status"]) > 256
+    ):
+        return False
+    if "sheets_truncated" in window and not isinstance(
+        window["sheets_truncated"], bool
+    ):
+        return False
+    sheets = window.get("sheets", [])
+    return (
+        isinstance(sheets, list)
+        and len(sheets) <= 2
+        and all(_valid_startup_window(value, pid, sheet=True) for value in sheets)
+    )
+
+
+def startup_window_status(settings: Settings) -> dict[str, Any]:
+    if settings.system != "Darwin":
+        return {"status": "not_applicable", "windows": []}
+    require_macos_runner(settings)
+    validate_startup_diagnostic_paths(settings.layout)
+    identities = [
+        identity
+        for identity in read_owned(settings.layout)
+        if identity.kind == "musescore"
+        and identity.executable == str(settings.executable.resolve())
+        and matching_process(identity) is not None
+    ]
+    if len(identities) != 1:
+        return {"status": "unavailable_pid", "windows": []}
+    identity = identities[0]
+    result = _run_startup_ui_helper(
+        {"root": str(settings.layout.root.absolute()), "identity": asdict(identity)}
+    )
+    if matching_process(identity) is None:
+        return {"status": "identity_changed", "windows": []}
+    return result
+
+
+class StartupDiagnostics:
+    """Best-effort latest-start evidence, independent of startup/retry decisions."""
+
+    def __init__(self, settings: Settings, score: Path) -> None:
+        self.settings = settings
+        self.started = time.monotonic()
+        self.attempt_times: dict[int, float] = {}
+        resolved = score.resolve()
+        fixture = (
+            str(resolved.relative_to(REPOSITORY_ROOT))
+            if resolved.is_relative_to(REPOSITORY_ROOT)
+            else "external/" + score.name
+        )
+        self.report: dict[str, Any] = {
+            "version": 1,
+            "fixture": fixture[:256],
+            "started_at": self.now(),
+            "phase": "preparing",
+            "attempts": [],
+        }
+
+    @staticmethod
+    def now() -> str:
+        return datetime.now(UTC).isoformat()
+
+    def record(self, phase: str) -> None:
+        self.report.update(
+            phase=phase,
+            updated_at=self.now(),
+            elapsed_seconds=round(time.monotonic() - self.started, 3),
+        )
+        try:
+            validate_startup_diagnostic_paths(self.settings.layout)
+            self.report["processes"] = startup_process_status(self.settings.layout)
+            write_startup_diagnostics(self.settings.layout, self.report)
+        except Exception as error:
+            logger.warning(
+                "Startup diagnostics unavailable (%s): %.256s",
+                type(error).__name__,
+                error,
+            )
+
+    def attempt(
+        self, number: int, process: subprocess.Popen[bytes], state: str
+    ) -> None:
+        try:
+            validate_startup_diagnostic_paths(self.settings.layout)
+            attempts = self.report["attempts"]
+            attempt = attempts[-1]
+            if state == "started":
+                attempt.update(
+                    pid=process.pid,
+                    initial_processes=startup_process_status(self.settings.layout),
+                )
+            attempt.update(
+                state=state,
+                observed_at=self.now(),
+                exit_code=process.poll(),
+                processes=startup_process_status(self.settings.layout),
+                elapsed_seconds=round(time.monotonic() - self.attempt_times[number], 3),
+            )
+            if state == "exited":
+                with self.settings.layout.stdout_log.open("rb") as stream:
+                    stream.seek(0, os.SEEK_END)
+                    length = stream.tell()
+                    stream.seek(max(0, length - 4096))
+                    attempt["stdout_tail"] = stream.read(4096).decode(
+                        "utf-8", errors="replace"
+                    )
+            self.record("launching")
+        except Exception as error:
+            logger.warning("Startup attempt diagnostics unavailable: %.256s", error)
+
+    def begin_attempt(self, number: int) -> None:
+        self.attempt_times[number] = time.monotonic()
+        self.report["attempts"].append(
+            {"number": number, "started_at": self.now(), "state": "creating_process"}
+        )
+        self.record("launching")
+
+    def failure(self, error: BaseException) -> None:
+        self.report["failure_phase"] = self.report["phase"]
+        self.report["failure"] = {
+            "type": type(error).__name__,
+            "message": str(error)[:512],
+        }
+        try:
+            self.report["ui"] = startup_window_status(self.settings)
+        except Exception as capture_error:
+            self.report["ui"] = {
+                "status": "unavailable",
+                "reason": type(capture_error).__name__,
+                "windows": [],
+            }
+        self.record("failed")
+
+
+def capture_startup_diagnostics(settings: Settings) -> dict[str, Any]:
+    """Capture fixed read-only evidence in an existing owned profile, for CI proof."""
+    if settings.system == "Darwin":
+        require_macos_runner(settings)
+    validate_startup_diagnostic_paths(settings.layout)
+    with profile_lock(settings.layout):
+        return _capture_startup_diagnostics(settings)
+
+
+def _capture_startup_diagnostics(settings: Settings) -> dict[str, Any]:
+    validate_startup_diagnostic_paths(settings.layout)
+    source = settings.layout.root / STARTUP_DIAGNOSTICS_FILE
+    with source.open("rb") as stream:
+        raw = stream.read(STARTUP_DIAGNOSTICS_BYTES + 1)
+    if len(raw) > STARTUP_DIAGNOSTICS_BYTES:
+        raise HarnessError("Existing startup report exceeds its size bound")
+    report = json.loads(raw)
+    if not isinstance(report, dict) or report.get("version") != 1:
+        raise HarnessError("Invalid existing startup report")
+    report["probe"] = {
+        "observed_at": StartupDiagnostics.now(),
+        "processes": startup_process_status(settings.layout),
+        "ui": startup_window_status(settings),
+    }
+    write_startup_diagnostics(settings.layout, report)
+    return report
+
+
 def start(settings: Settings, score: Path) -> None:
     account = require_macos_runner(settings) if settings.system == "Darwin" else None
     if not settings.executable.exists():
@@ -1458,31 +1972,49 @@ def start(settings: Settings, score: Path) -> None:
         preflight(settings)
         prepare_directories(settings.layout)
         save_owned(settings.layout, [])
-        if account:
-            seed_macos_runner(settings, account)
-        else:
-            seed_configuration(settings.layout)
-        if os.environ.get("MUSESCORE_SELECTION_TEST_SETUP") == "1":
-            _install_selection_fixture(settings.layout)
-        if os.environ.get("MUSESCORE_PITCH_BATCH_TEST_SETUP") == "1":
-            _install_pitch_batch_fixture(settings.layout)
-        if os.environ.get("MUSESCORE_CHORD_TONE_TEST_SETUP") == "1":
-            _install_chord_tone_fixture(settings.layout)
-        if os.environ.get("MUSESCORE_NOTE_REST_TEST_SETUP") == "1":
-            _install_note_rest_fixture(settings.layout)
+        diagnostics = StartupDiagnostics(settings, score)
+        diagnostics.record("preparing")
         try:
+            if account:
+                seed_macos_runner(settings, account)
+            else:
+                seed_configuration(settings.layout)
+            if os.environ.get("MUSESCORE_SELECTION_TEST_SETUP") == "1":
+                _install_selection_fixture(settings.layout)
+            if os.environ.get("MUSESCORE_PITCH_BATCH_TEST_SETUP") == "1":
+                _install_pitch_batch_fixture(settings.layout)
+            if os.environ.get("MUSESCORE_CHORD_TONE_TEST_SETUP") == "1":
+                _install_chord_tone_fixture(settings.layout)
+            if os.environ.get("MUSESCORE_NOTE_REST_TEST_SETUP") == "1":
+                _install_note_rest_fixture(settings.layout)
             if settings.system == "Linux":
                 start_xvfb(settings)
-            launch(settings, score.resolve())
+            diagnostics.record("launching")
+            launch(settings, score.resolve(), diagnostics)
+            diagnostics.record("opening_plugin")
             trigger_plugin(settings)
+            diagnostics.record("waiting_for_bridge")
             uri = f"ws://localhost:{BRIDGE_PORT}"
             if not asyncio.run(wait_for_bridge(uri, BRIDGE_TIMEOUT_SECONDS)):
                 print_log_tails(settings.layout)
                 raise HarnessError(f"the bridge plugin did not answer at {uri}")
             refresh_owned(settings.layout)
+            diagnostics.record("verifying_paths")
             verify_private_paths(settings)
-        except BaseException:
-            stop_owned(settings.layout)
+            diagnostics.record("ready")
+        except BaseException as error:
+            try:
+                diagnostics.failure(error)
+            except Exception as diagnostic_error:
+                logger.warning(
+                    "Failure diagnostics unavailable: %.256s", diagnostic_error
+                )
+            try:
+                stop_owned(settings.layout)
+            except Exception as cleanup_error:
+                logger.error(
+                    "Owned cleanup failed after startup error: %.256s", cleanup_error
+                )
             raise
     logger.info("bridge ready; owned artifact root %s", settings.layout.root)
 
@@ -1579,6 +2111,7 @@ def collect_logs(settings: Settings, destination: Path) -> None:
         (settings.layout.stdout_log, root),
         (root / "xvfb.log", root),
         (root / "ownership-diagnostics.json", root),
+        (root / STARTUP_DIAGNOSTICS_FILE, root),
         (root / "runner-session-moves.json", root),
     ]
     if settings.system == "Darwin" and settings.macos_runner_mode:

@@ -398,6 +398,11 @@ jobs:
       - name: Bridge tests (live plugin)
         run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
+      - name: Read-only owned startup diagnostic proof (reuse current fixture)
+        env:
+          MCP_SCORE_STARTUP_DIAGNOSTICS_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_startup_diagnostics.py -v
+
       - name: Start disposable note-rest normal fixture
         env:
           MUSESCORE_NOTE_REST_TEST_SETUP: "1"
