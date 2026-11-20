@@ -1560,6 +1560,7 @@ def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            bufsize=0,
         )
     except OSError as error:
         return {
@@ -1569,6 +1570,27 @@ def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
         }
     assert process.stdin is not None and process.stdout is not None
     output: Queue[bytes | OSError] = Queue(maxsize=1)
+    input_finished: Queue[OSError | None] = Queue(maxsize=1)
+
+    def write_input() -> None:
+        failure = None
+        try:
+            remaining = memoryview(payload)
+            while remaining:
+                written = os.write(process.stdin.fileno(), remaining)
+                if written <= 0:
+                    raise OSError("Helper stdin transfer made no progress")
+                remaining = remaining[written:]
+        except OSError as error:
+            failure = error
+        finally:
+            # This thread alone closes stdin. It is unbuffered, so closing can
+            # never flush unwritten bytes or contend with the parent's cleanup.
+            try:
+                process.stdin.close()
+            except OSError as error:
+                failure = failure or error
+            input_finished.put(failure)
 
     def read_output() -> None:
         try:
@@ -1583,13 +1605,16 @@ def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
             output.put(bytes(raw))
         except OSError as error:
             output.put(error)
+        finally:
+            with contextlib.suppress(OSError):
+                process.stdout.close()
 
     reader = threading.Thread(target=read_output, daemon=True)
-    reader.start()
+    writer = threading.Thread(target=write_input, daemon=True)
     deadline = time.monotonic() + STARTUP_UI_SECONDS
+    reader.start()
+    writer.start()
     try:
-        process.stdin.write(payload)
-        process.stdin.close()
         try:
             raw = output.get(timeout=max(0.01, deadline - time.monotonic()))
         except Empty:
@@ -1608,6 +1633,18 @@ def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
             return {"status": "timeout", "windows": []}
         if code:
             return {"status": "helper_failed", "exit_code": code, "windows": []}
+        try:
+            input_error = input_finished.get(
+                timeout=max(0.01, deadline - time.monotonic())
+            )
+        except Empty:
+            return {"status": "timeout", "windows": []}
+        if input_error is not None:
+            return {
+                "status": "helper_failed",
+                "reason": type(input_error).__name__,
+                "windows": [],
+            }
         try:
             result = json.loads(raw)
             if (
@@ -1656,9 +1693,11 @@ def _run_startup_ui_helper(request: dict[str, Any]) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             logger.warning("Diagnostic helper did not exit after its deadline")
         reader.join(timeout=0.1)
-        process.stdout.close()
-        with contextlib.suppress(OSError):
-            process.stdin.close()
+        writer.join(timeout=0.1)
+        if reader.is_alive() or writer.is_alive():
+            logger.warning(
+                "Diagnostic helper pipe transfer did not finish after cleanup"
+            )
 
 
 def _valid_startup_window(window: Any, pid: int, *, sheet: bool = False) -> bool:

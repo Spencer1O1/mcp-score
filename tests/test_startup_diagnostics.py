@@ -6,6 +6,9 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
+import sys
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -228,6 +231,48 @@ def test_actual_fixed_child_output_limits_timeout_and_malformed_reply(
             {"root": "/owned", "identity": {"pid": 42}}
         )
     assert result["status"] == status and result["windows"] == []
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux pipe capacity control")
+def test_large_accepted_input_to_nonreading_helper_obeys_deadline_and_reaps_child(
+    owned,
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "nonreading-probe.py"
+    script.write_text("import time; time.sleep(2)")
+    request = {"root": "x" * 7000, "identity": {"pid": 42}}
+    assert 4096 < len(json.dumps(request).encode()) < 8192
+    popen = subprocess.Popen
+    children = []
+
+    def spawn(*arguments, **keywords):
+        # Deliberately reduce capacity to force backpressure. This is not an
+        # assertion about the default capacity on any native runner platform.
+        child = popen(*arguments, **keywords, pipesize=4096)
+        children.append(child)
+        return child
+
+    with (
+        patch.object(harness, "STARTUP_UI_HELPER", script),
+        patch.object(harness, "STARTUP_UI_SECONDS", 0.1),
+        patch.object(harness.subprocess, "Popen", side_effect=spawn),
+    ):
+        started = time.monotonic()
+        result = harness._run_startup_ui_helper(request)
+        elapsed = time.monotonic() - started
+    assert result == {"status": "timeout", "windows": []}
+    assert elapsed < 1
+    assert len(children) == 1 and children[0].returncode is not None
+    assert children[0].stdin.closed and children[0].stdout.closed
+
+    # A diagnostic transport timeout remains diagnostic data, never the reason
+    # replacing the original failure that this report was meant to explain.
+    original = harness.HarnessError("original bridge timeout")
+    trace = harness.StartupDiagnostics(owned, Path("fixture.xml"))
+    with patch.object(harness, "startup_window_status", return_value=result):
+        trace.failure(original)
+    assert trace.report["failure"]["message"] == str(original)
+    assert trace.report["ui"]["status"] == "timeout"
 
 
 def test_no_macos_helper_on_other_platforms_or_default_local_mac(owned) -> None:
