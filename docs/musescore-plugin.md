@@ -373,7 +373,15 @@ The native path decisions follow [MuseScore's portable settings implementation](
 [Qt's Windows known-folder resolver](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qstandardpaths_win.cpp),
 and [CoreFoundation's fixed-home handling](https://github.com/apple-oss-distributions/CF/blob/main/CFPlatform.c)
 and [its preference-daemon environment control](https://github.com/apple-oss-distributions/CF/blob/main/CFRuntime.c).
-Native nonce reads and actual preference writes remain required; the environment
-switches alone do not establish isolation.
+The native probe uses the same `CFPreferencesCopyValue` and `CFPreferencesSetValue`
+APIs as [Qt's native settings backend](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qsettings_mac.cpp).
+It writes only after the unpredictable private read nonce matches, then checks
+that the native write persisted in the private plist. Environment switches alone
+do not establish isolation.
+
+Qt Quick pipeline caches use the documented `QSG_RHI_PIPELINE_CACHE_LOAD` and
+`QSG_RHI_PIPELINE_CACHE_SAVE` file overrides inside the private profile; this
+avoids Windows known-folder cache writes without disabling snapshot assertions.
+See [Qt's graphics configuration implementation](https://github.com/qt/qtdeclarative/blob/v6.9.3/src/quick/items/qquickgraphicsconfiguration.cpp).
 The live platform matrix additionally checks that the ordinary profile remains
 unchanged across startup and shutdown.

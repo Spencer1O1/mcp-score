@@ -421,6 +421,11 @@ def child_environment(settings: Settings) -> dict[str, str]:
     environment["TMPDIR"] = str(root / "tmp")
     environment["TMP"] = str(root / "tmp")
     environment["TEMP"] = str(root / "tmp")
+    # Qt Quick's automatic renderer cache otherwise bypasses the portable
+    # application's data resolver and uses native QStandardPaths on Windows.
+    pipeline_cache = str(root / "cache/qt-pipeline.cache")
+    environment["QSG_RHI_PIPELINE_CACHE_LOAD"] = pipeline_cache
+    environment["QSG_RHI_PIPELINE_CACHE_SAVE"] = pipeline_cache
     if settings.system == "Darwin":
         environment["CFFIXED_USER_HOME"] = str(root)
         # CoreFoundation otherwise delegates native preferences to the shared
@@ -644,9 +649,22 @@ def preflight(settings: Settings) -> None:
     for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
         try:
             with socket.socket(family) as probe:
+                if settings.system == "Windows":
+                    # Windows SO_REUSEADDR can alias an active listener. Keep
+                    # exclusive semantics there instead of applying POSIX reuse.
+                    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                        probe.setsockopt(
+                            socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1
+                        )
+                else:
+                    # Closed owned TCP connections can retain TIME_WAIT even
+                    # though the previous listener is gone. This is the same
+                    # listener-reuse policy used by the application's server.
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 if family == socket.AF_INET6:
                     probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
                 probe.bind((host, BRIDGE_PORT))
+                probe.listen(1)
         except OSError as error:
             unsupported = {
                 errno.EAFNOSUPPORT,
@@ -674,7 +692,7 @@ def preflight(settings: Settings) -> None:
 
 
 def prepare_directories(layout: Layout) -> None:
-    for path in (layout.root / "tmp", layout.root / "runtime"):
+    for path in (layout.root / "tmp", layout.root / "runtime", layout.root / "cache"):
         path.mkdir(parents=True, exist_ok=True)
         path.chmod(0o700)
 
@@ -918,14 +936,35 @@ def verify_macos_preferences(settings: Settings) -> None:
         return
     with settings.layout.preferences.file.open("rb") as source:
         expected_nonce = plistlib.load(source)["mcp-score.profileNonce"]
+    # Match the CFPreferencesCopyValue/SetValue APIs used by QSettings itself;
+    # the defaults utility may use daemon behavior specific to that utility.
+    native_probe = (
+        'ObjC.import("CoreFoundation"); '
+        f"var domain = $({json.dumps(MACOS_PREFERENCES_DOMAIN)}); "
+        f"var expected = {json.dumps(expected_nonce)}; "
+        "var user = $.kCFPreferencesCurrentUser; "
+        "var host = $.kCFPreferencesAnyHost; "
+        'var value = $.CFPreferencesCopyValue($("mcp-score.profileNonce"), '
+        "domain, user, host); "
+        "var actual = value ? ObjC.unwrap(value) : null; "
+        'if (actual !== expected) { throw new Error("Private native nonce missing"); } '
+        '$.CFPreferencesSetValue($("mcp-score.nativeWriteNonce"), $(expected), '
+        "domain, user, host); "
+        "if (!$.CFPreferencesSynchronize(domain, user, host)) { "
+        'throw new Error("Private native preferences did not synchronize"); } '
+        "actual;"
+    )
     result = run(
-        ["defaults", "read", MACOS_PREFERENCES_DOMAIN, "mcp-score.profileNonce"],
+        ["osascript", "-l", "JavaScript", "-e", native_probe],
         env=child_environment(settings),
     )
-    if result.stdout.strip() != expected_nonce:
-        raise HarnessError(
-            "CoreFoundation did not resolve the private preference domain"
-        )
+    with settings.layout.preferences.file.open("rb") as source:
+        private_values = plistlib.load(source)
+    if (
+        result.stdout.strip() != expected_nonce
+        or private_values.get("mcp-score.nativeWriteNonce") != expected_nonce
+    ):
+        raise HarnessError("CoreFoundation did not read and write the private domain")
     foundation = run(
         [
             "osascript",

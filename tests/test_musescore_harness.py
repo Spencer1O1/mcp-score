@@ -561,6 +561,13 @@ class TestPrivateEnvironment:
         assert environment.get("HOME") == before.get("HOME")
         assert environment.get("CODEX_HOME") == before.get("CODEX_HOME")
         assert environment["TMPDIR"] == str(settings.layout.root / "tmp")
+        assert environment["QSG_RHI_PIPELINE_CACHE_LOAD"] == str(
+            settings.layout.root / "cache/qt-pipeline.cache"
+        )
+        assert (
+            environment["QSG_RHI_PIPELINE_CACHE_SAVE"]
+            == environment["QSG_RHI_PIPELINE_CACHE_LOAD"]
+        )
         if system == "Linux":
             assert environment["XDG_DATA_HOME"] == str(settings.layout.root / "data")
         if system == "Darwin":
@@ -575,17 +582,29 @@ class TestPrivateEnvironment:
         harness.seed_configuration(settings.layout)
         with settings.layout.preferences.file.open("rb") as source:
             nonce = plistlib.load(source)["mcp-score.profileNonce"]
-        responses = [
-            MagicMock(stdout=nonce + "\n"),
-            MagicMock(
+        calls: list[tuple[list[str], dict[str, Any]]] = []
+
+        def native_response(command: list[str], **kwargs: Any) -> MagicMock:
+            calls.append((command, kwargs))
+            if len(calls) == 1:
+                with settings.layout.preferences.file.open("rb") as source:
+                    values = plistlib.load(source)
+                values["mcp-score.nativeWriteNonce"] = nonce
+                with settings.layout.preferences.file.open("wb") as output:
+                    plistlib.dump(values, output)
+                return MagicMock(stdout=nonce + "\n")
+            return MagicMock(
                 stdout=str(settings.layout.root / "Library/Application Support") + "\n"
-            ),
-        ]
-        with patch.object(harness, "run", side_effect=responses) as run:
+            )
+
+        with patch.object(harness, "run", side_effect=native_response):
             harness.verify_macos_preferences(settings)
-        first = run.call_args_list[0]
-        assert first.args[0][0:2] == ["defaults", "read"]
-        assert first.kwargs["env"]["CFFIXED_USER_HOME"] == str(settings.layout.root)
+        assert calls[0][0][0:4] == ["osascript", "-l", "JavaScript", "-e"]
+        script = calls[0][0][4]
+        assert script.index("actual !== expected") < script.index(
+            "CFPreferencesSetValue"
+        )
+        assert calls[0][1]["env"]["CFFIXED_USER_HOME"] == str(settings.layout.root)
 
     def test_normal_profile_snapshot_detects_changed_bytes(
         self, tmp_path: Path
@@ -612,6 +631,8 @@ def test_occupied_bridge_refuses_before_creating_private_profile(
     score = tmp_path / "fixture.musicxml"
     score.touch()
     with socket.socket() as occupied:
+        if os.name != "nt":
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         occupied.bind(("127.0.0.1", 0))
         occupied.listen()
         with (
@@ -798,3 +819,47 @@ def test_expected_exec_target_does_not_accept_a_reused_pid(tmp_path: Path) -> No
     finally:
         unrelated.terminate()
         unrelated.wait(timeout=5)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX TIME_WAIT reuse semantics")
+def test_stopped_owned_listener_time_wait_does_not_block_fixture_restart(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path, "Darwin")
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    client = socket.create_connection(("127.0.0.1", port))
+    accepted, _ = listener.accept()
+    accepted.close()  # active closer owns TIME_WAIT on the listener's port
+    client.close()
+    listener.close()
+    with (
+        patch.object(harness, "BRIDGE_PORT", port),
+        patch.object(harness, "musescore_running", return_value=False),
+    ):
+        harness.preflight(settings)
+
+
+def test_macos_failed_native_read_performs_no_probe_fallback_or_launch(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path, "Darwin")
+    harness.seed_configuration(settings.layout)
+    with settings.layout.preferences.file.open("rb") as source:
+        before = plistlib.load(source)
+    with (
+        patch.object(
+            harness,
+            "run",
+            side_effect=harness.HarnessError("Private native nonce missing"),
+        ) as run,
+        pytest.raises(harness.HarnessError, match="Private native nonce missing"),
+    ):
+        harness.verify_macos_preferences(settings)
+    assert run.call_count == 1
+    with settings.layout.preferences.file.open("rb") as source:
+        assert plistlib.load(source) == before
+    assert "mcp-score.nativeWriteNonce" not in before
