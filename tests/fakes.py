@@ -20,6 +20,7 @@ from websockets.protocol import State
 
 from mcp_score.bridge import BridgeError, BridgeRegistry, CommandResult, ScoreBridge
 from mcp_score.bridge.musescore import MuseScoreCommand
+from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -84,6 +85,7 @@ MUSESCORE_HANDSHAKE: dict[str, Any] = {
                 MuseScoreCommand.GET_CAPABILITIES,
                 MuseScoreCommand.GET_SCORE,
                 MuseScoreCommand.GET_CURSOR_INFO,
+                MuseScoreCommand.READ_PASSAGE,
                 MuseScoreCommand.UNDO,
                 MuseScoreCommand.PROCESS_SEQUENCE,
             }
@@ -106,6 +108,15 @@ DEFAULT_REPLIES: dict[str, BaseModel] = {
         time_signature=TimeSignature(numerator=4, denominator=4),
     ),
     "get_cursor_info": _START_CURSOR,
+    "read_passage": Passage(
+        start_measure=1,
+        end_measure=1,
+        staves=[0],
+        voices=[0, 1, 2, 3],
+        measures=[],
+        range_complete=True,
+        unsupported=[],
+    ),
     "get_properties": SelectionProperties(cursor=_START_CURSOR),
     "go_to_measure": _START,
     "go_to_staff": _START,
@@ -237,6 +248,17 @@ class FakeBridge(ScoreBridge):
 
     async def get_cursor_info(self) -> CursorInfo:
         return self._answer(CursorInfo, "get_cursor_info")
+
+    async def read_passage(
+        self,
+        start_measure: int,
+        end_measure: int,
+        staff: int | None = None,
+        voice: int | None = None,
+    ) -> Passage:
+        return self._answer(
+            Passage, "read_passage", start_measure, end_measure, staff, voice
+        )
 
     async def get_properties(self) -> SelectionProperties:
         return self._answer(SelectionProperties, "get_properties")

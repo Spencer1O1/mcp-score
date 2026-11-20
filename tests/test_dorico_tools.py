@@ -127,13 +127,13 @@ class TestDoricoLimitationsThroughTools:
         connection = await _connect_dorico(context, COMMAND_ACCEPTED)
 
         # Act
-        with pytest.raises(
-            ToolError, match="^Dorico's Remote Control API cannot report the cursor"
-        ):
+        with pytest.raises(ToolError, match="^Dorico cannot read live score content"):
             await read_passage(context, 1, 1)
 
-        # Assert: it got as far as moving to the bar.
-        assert sent_payloads(connection)[-1]["commandName"] == "Edit.GoToBar"
+        # Assert: reading unsupported contents does not navigate Dorico.
+        assert not any(
+            "commandName" in payload for payload in sent_payloads(connection)
+        )
 
     @pytest.mark.anyio()
     async def test_get_selection_properties_reports_dorico_properties_with_warning(

@@ -15,6 +15,8 @@ from websockets.protocol import State
 from mcp_score.bridge import BridgeError
 from mcp_score.bridge.dorico import DoricoBridge
 from mcp_score.bridge.musescore import MuseScoreBridge
+from mcp_score.bridge.passage import Passage, PassageEvent, PassageMeasure, PassageNote
+from mcp_score.bridge.results import Duration, TimeSignature
 from mcp_score.server import create_server
 from mcp_score.tools import ToolError
 from tests.fakes import (
@@ -261,3 +263,68 @@ async def test_mcp_tool_error_preserves_unknown_outcome_and_request_correlation(
     assert envelope["details"]["target"] == {"count": 1}
     assert envelope["details"]["request_id"]
     assert "Inspect the score" in envelope["error"]
+
+
+@pytest.mark.anyio()
+async def test_passage_reconnect_preserves_complete_event_schema() -> None:
+    quarter = Duration(numerator=1, denominator=4)
+    passage = Passage(
+        start_measure=1,
+        end_measure=1,
+        staves=[0],
+        voices=[0],
+        range_complete=True,
+        unsupported=["grace-note contents"],
+        measures=[
+            PassageMeasure(
+                measure=1,
+                tick=0,
+                actual_duration=Duration(numerator=1, denominator=1),
+                time_signature=TimeSignature(numerator=4, denominator=4),
+                events=[
+                    PassageEvent(
+                        kind="chord",
+                        type=93,
+                        staff=0,
+                        voice=0,
+                        tick=index * 480,
+                        offset=Duration(numerator=index, denominator=4),
+                        duration=quarter,
+                        actual_duration=quarter,
+                        notes=[
+                            PassageNote(
+                                pitch=pitch, tpc=tpc, name=name, displayed_tpc=tpc
+                            )
+                        ],
+                    )
+                    for index, (pitch, tpc, name) in enumerate(
+                        [(71, 19, "B4"), (69, 17, "A4"), (67, 15, "G4"), (65, 13, "F4")]
+                    )
+                ],
+            )
+        ],
+    )
+    dropped = fake_connection(MUSESCORE_HANDSHAKE, ConnectionClosed(None, None))
+    replacement = fake_connection(MUSESCORE_HANDSHAKE, {"result": passage.model_dump()})
+    bridge = MuseScoreBridge()
+
+    with patch(WEBSOCKETS_CONNECT, AsyncMock(side_effect=[dropped, replacement])):
+        result = await bridge.read_passage(1, 1, staff=0, voice=0)
+
+    assert result == passage
+    assert [event.notes[0].name for event in result.measures[0].events] == [
+        "B4",
+        "A4",
+        "G4",
+        "F4",
+    ]
+    assert [item["command"] for item in sent_payloads(replacement)] == [
+        "getCapabilities",
+        "readPassage",
+    ]
+    assert sent_payloads(replacement)[1]["params"] == {
+        "startMeasure": 1,
+        "endMeasure": 1,
+        "staff": 0,
+        "voice": 0,
+    }

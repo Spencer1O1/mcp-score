@@ -133,6 +133,7 @@ class TestCommandPreflight:
             ("addNote", {"pitch": 60}),
             ("processSequence", {"sequence": [{"action": "addNote"}]}),
             ("processSequence", {"sequence": [{"action": "getScore"}]}),
+            ("processSequence", {"sequence": [{"action": "readPassage"}]}),
         ],
     )
     async def test_unsupported_command_is_not_sent(

@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.results import (
         BarlineSet,
         ChordSymbolAdded,
@@ -109,6 +110,19 @@ class ScoreBridge(ABC):
     @abstractmethod
     async def get_cursor_info(self) -> CursorInfo:
         """The current position and what is there."""
+
+    async def read_passage(
+        self,
+        start_measure: int,
+        end_measure: int,
+        staff: int | None = None,
+        voice: int | None = None,
+    ) -> Passage:
+        """Read live events without navigating or selecting score elements.
+
+        Applications without a content-reading protocol reject the operation.
+        """
+        raise BridgeError(f"{self.application_name} cannot read live score content.")
 
     @abstractmethod
     async def get_properties(self) -> SelectionProperties:

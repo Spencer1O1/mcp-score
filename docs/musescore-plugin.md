@@ -69,6 +69,37 @@ echo '{"command": "ping"}' | websocat ws://localhost:8765
 # Expected response: {"result":"pong"}
 ```
 
+## Reading live passages
+
+`read_passage` and `get_measure_content` return every rhythmic event in the
+requested live measures, including unsaved changes. Omitting `staff` reads all
+staves; omitting `voice` reads all voices. These reads do not select elements or
+change the bridge's logical cursor. Measure numbers are ordinal, starting at
+one, without expanding repeats; staff and voice indices start at zero.
+
+Each measure includes its start tick, actual measure duration, and nominal time
+signature where exposed by MuseScore. Measure duration is not used to infer the
+meter: a whole-note duration alone cannot distinguish 4/4 from 2/2. Events include
+absolute ticks, reduced whole-note offsets, notated durations, elapsed durations
+where available, and all chord tones with concert pitch spelling. A full-measure
+rest spans the actual measure length. Concert names use sounding MIDI pitch and
+concert TPC even when MuseScore displays transposed notation; `displayed_tpc`
+reports the current display spelling separately.
+
+`range_complete` confirms traversal of the requested rhythmic range, not full
+notation fidelity. The `unsupported` field lists missing details, including grace
+notes, ties and spanner endpoints, attached lyrics and articulations, written
+pitch octaves for transposing instruments, and effective instrument, clef, key,
+and tempo context. Opaque non-rhythmic segment elements report their type and
+text where available.
+
+Reads reject ranges exceeding the plugin's measure or event limits instead of
+returning a truncated passage. Request smaller ranges after such an error.
+Revision-bound continuation and persistent event identities are not implemented.
+An old plugin that lacks `readPassage` returns an error; the Python server does
+not fall back to returning only the first note. Reinstall the plugin when
+updating the server.
+
 ## Protocol
 
 The plugin accepts JSON messages over WebSocket. Each message must have a `command` field and optionally a `params` field. Responses have either a `result` field (on success) or an `error` field (on failure).
@@ -136,12 +167,13 @@ verified mutation results.
 
 ### Score information
 
-| Command           | Params                   | Description                                                                                     |
-| ----------------- | ------------------------ | ----------------------------------------------------------------------------------------------- |
-| `ping`            | none                     | Health check. Returns `"pong"`.                                                                 |
-| `getCapabilities` | `{protocolVersion: int}` | Negotiate the protocol and report plugin version and supported top-level and sequence commands. |
-| `getScore`        | none                     | Score metadata: title, parts, measure count, key/time signatures.                               |
-| `getCursorInfo`   | none                     | Current cursor position: measure, staff, beat, element info.                                    |
+| Command           | Params                                       | Description                                                                                     |
+| ----------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `ping`            | none                                         | Health check. Returns `"pong"`.                                                                 |
+| `getCapabilities` | `{protocolVersion: int}`                     | Negotiate the protocol and report plugin version and supported top-level and sequence commands. |
+| `getScore`        | none                                         | Score metadata: title, parts, measure count, key/time signatures.                               |
+| `getCursorInfo`   | none                                         | Current cursor position: measure, staff, beat, element info.                                    |
+| `readPassage`     | `{startMeasure, endMeasure, staff?, voice?}` | Read all live events in an inclusive measure range without navigating or selecting.             |
 
 ### Navigation
 
