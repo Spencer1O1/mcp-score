@@ -14,6 +14,11 @@ from typing import TYPE_CHECKING
 
 from pydantic import StrictInt, ValidationError
 
+from mcp_score.bridge.duration_edit import (
+    DurationEdit,
+    DurationEditRequest,
+    ExpectedDurationEvent,
+)
 from mcp_score.bridge.pitch import (
     ExpectedChord,
     PitchEdit,
@@ -84,6 +89,67 @@ async def add_live_note(
     await navigate(bridge, measure, staff)
     return await bridge.add_note(
         pitch, Duration(numerator=numerator, denominator=denominator)
+    )
+
+
+@score_tool
+async def set_live_event_duration(
+    context: ScoreContext,
+    measure: StrictInt,
+    staff: StrictInt,
+    voice: StrictInt,
+    offset: WholeNoteFraction,
+    duration: WholeNoteFraction,
+    expected: list[ExpectedDurationEvent],
+) -> DurationEdit:
+    """Shorten an ordinary live chord and fill its released time with rests.
+
+    Pass ALL events from a fresh get_measure_content read filtered to the explicit staff
+    and voice as expected. This complete voice-measure snapshot is checked inside
+    the synchronous native handler before any mutation. The only policy is
+    shorten_fill_rest: no extension or bar crossing. Only undotted whole through
+    32nd durations are accepted. MuseScore 4.7+ (major version 4) is required for
+    native duration rewriting and spanner inspection; older versions reject.
+
+    Target attachments (including lyrics/articulations), beams, ties, tuplets,
+    grace notes, drum/tab staves, microtonality and intersecting or unknown score
+    spanners reject. Distant spanner time/track metadata is verified unchanged.
+    Successful edits return actual before/after events across ALL measure tracks,
+    checking neighboring events and spelling, and create one undo step. No-op
+    requests create none. Selection/layout may change; logical cursor is untouched.
+    This snapshot does not identify a score instance or global revision and cannot
+    detect switching to identical contents. Not available with Dorico.
+
+    Args:
+        measure: Ordinal measure (1-indexed).
+        staff: Explicit staff index (0-indexed).
+        voice: Explicit voice index (0-3).
+        offset: Exact chord onset within the measure, in whole notes.
+        duration: New shorter or equal undotted binary whole-note duration.
+        expected: Complete fresh target voice measure events, including annotations.
+    """
+    bridge = require_bridge(context)
+    try:
+        request = DurationEditRequest.model_validate(
+            {
+                "measure": measure,
+                "staff": staff,
+                "voice": voice,
+                "offset": offset.model_dump(),
+                "duration": duration.model_dump(),
+                "policy": "shorten_fill_rest",
+                "expected": [event.model_dump() for event in expected],
+            }
+        )
+    except ValidationError as error:
+        raise ToolError(str(error)) from error
+    return await bridge.set_event_duration(
+        request.measure,
+        request.staff,
+        request.voice,
+        request.offset,
+        request.duration,
+        request.expected,
     )
 
 
@@ -348,6 +414,7 @@ def register(server: MCPServer) -> None:
     for tool in (
         add_live_note,
         set_live_note_pitch,
+        set_live_event_duration,
         add_live_rehearsal_mark,
         add_live_chord_symbol,
         add_live_dynamic,

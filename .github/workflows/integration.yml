@@ -105,6 +105,16 @@ jobs:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_pitch.py -v
 
+      - name: Start disposable guarded-duration fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-duration.musicxml
+
+      - name: Guarded duration tests (native support or explicit rejection)
+        env:
+          MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_duration.py -v
+
       - name: Stop only owned MuseScore and display processes
         if: always()
         run: uv run scripts/musescore_harness.py stop
@@ -192,6 +202,16 @@ jobs:
         env:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_pitch.py -v
+
+      - name: Start disposable guarded-duration fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-duration.musicxml
+
+      - name: Guarded duration tests (native support or explicit rejection)
+        env:
+          MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_duration.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()
@@ -282,6 +302,16 @@ jobs:
         env:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_pitch.py -v
+
+      - name: Start disposable guarded-duration fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-duration.musicxml
+
+      - name: Guarded duration tests (native support or explicit rejection)
+        env:
+          MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_duration.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()

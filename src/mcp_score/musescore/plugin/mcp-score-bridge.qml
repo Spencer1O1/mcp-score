@@ -24,6 +24,7 @@ import "passage.js" as Passage
 import "current-selection.js" as CurrentSelection
 import "editing.js" as Editing
 import "pitch.js" as Pitch
+import "duration.js" as DurationEdit
 import "selection.js" as Selection
 import "sequence.js" as Sequence
 import "protocol.js" as Protocol
@@ -67,6 +68,7 @@ MuseScore {
         "goToStaff":            Reading.goToStaff,
         "addNote":              Editing.addNote,
         "setNotePitch":         Pitch.setNotePitch,
+        "setEventDuration":     DurationEdit.setEventDuration,
         "addRehearsalMark":     Editing.addRehearsalMark,
         "setBarline":           Editing.setBarline,
         "setKeySignature":      Editing.setKeySignature,

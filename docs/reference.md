@@ -371,6 +371,50 @@ rejected. Written octave is not returned. Not available with Dorico.
 | `snapshot_scope`    | `str`                      |                                                                           |
 | `limitations`       | `list[str]`                | Target matching does not establish application-wide identity or revision. |
 
+### `set_live_event_duration`
+
+Shorten an ordinary live chord and fill its released time with rests.
+
+Pass ALL events from a fresh get_measure_content read filtered to the explicit staff
+and voice as expected. This complete voice-measure snapshot is checked inside
+the synchronous native handler before any mutation. The only policy is
+shorten_fill_rest: no extension or bar crossing. Only undotted whole through
+32nd durations are accepted. MuseScore 4.7+ (major version 4) is required for
+native duration rewriting and spanner inspection; older versions reject.
+
+Target attachments (including lyrics/articulations), beams, ties, tuplets,
+grace notes, drum/tab staves, microtonality and intersecting or unknown score
+spanners reject. Distant spanner time/track metadata is verified unchanged.
+Successful edits return actual before/after events across ALL measure tracks,
+checking neighboring events and spelling, and create one undo step. No-op
+requests create none. Selection/layout may change; logical cursor is untouched.
+This snapshot does not identify a score instance or global revision and cannot
+detect switching to identical contents. Not available with Dorico.
+
+| Parameter  | Type                          | Default    | Description                                                        |
+| ---------- | ----------------------------- | ---------- | ------------------------------------------------------------------ |
+| `measure`  | `int`                         | (required) | Ordinal measure (1-indexed).                                       |
+| `staff`    | `int`                         | (required) | Explicit staff index (0-indexed).                                  |
+| `voice`    | `int`                         | (required) | Explicit voice index (0-3).                                        |
+| `offset`   | `WholeNoteFraction`           | (required) | Exact chord onset within the measure, in whole notes.              |
+| `duration` | `WholeNoteFraction`           | (required) | New shorter or equal undotted binary whole-note duration.          |
+| `expected` | `list[ExpectedDurationEvent]` | (required) | Complete fresh target voice measure events, including annotations. |
+
+**Returns** `DurationEdit`: Actual before/after events across all tracks of the edited measure.
+
+| Field              | Type                             | Description                                                           |
+| ------------------ | -------------------------------- | --------------------------------------------------------------------- |
+| `measure`          | `int`                            |                                                                       |
+| `staff`            | `int`                            |                                                                       |
+| `voice`            | `int`                            |                                                                       |
+| `before`           | `list[PassageEvent]`             |                                                                       |
+| `after`            | `list[PassageEvent]`             |                                                                       |
+| `verified`         | `bool`                           |                                                                       |
+| `mutation_status`  | `"applied" \| "unchanged"`       |                                                                       |
+| `snapshot_scope`   | `str`                            |                                                                       |
+| `selection_status` | `"unchanged" \| "not_preserved"` | Native rewriting may deselect; no selection restoration is attempted. |
+| `limitations`      | `list[str]`                      |                                                                       |
+
 ### `add_live_rehearsal_mark`
 
 Add a rehearsal mark to a measure in the live score.
@@ -727,6 +771,25 @@ A complete, strictly typed target snapshot from a fresh live read.
 | `text`            | `str \| None`                       |                                                                                |
 | `lyrics`          | `list[PassageLyric] \| None`        | Informational snapshot metadata, accepted but not compared by the pitch guard. |
 | `articulations`   | `list[PassageArticulation] \| None` | Informational snapshot metadata, accepted but not compared by the pitch guard. |
+
+### `ExpectedDurationEvent`
+
+Every event in the fresh target voice's complete measure read.
+
+| Field             | Type                                | Description |
+| ----------------- | ----------------------------------- | ----------- |
+| `kind`            | `"chord" \| "rest" \| "other"`      |             |
+| `type`            | `int`                               |             |
+| `staff`           | `int`                               |             |
+| `voice`           | `int`                               |             |
+| `tick`            | `int`                               |             |
+| `offset`          | `WholeNoteFraction`                 |             |
+| `duration`        | `WholeNoteFraction \| None`         |             |
+| `actual_duration` | `WholeNoteFraction \| None`         |             |
+| `notes`           | `list[ExpectedPitchNote]`           |             |
+| `text`            | `str \| None`                       |             |
+| `lyrics`          | `list[PassageLyric] \| None`        |             |
+| `articulations`   | `list[PassageArticulation] \| None` |             |
 
 ### `ExpectedPitchNote`
 
