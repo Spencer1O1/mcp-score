@@ -873,6 +873,67 @@ receipts or automatic replay; inspect an uncertain response before proceeding.
 | `selection_status` | `str`                |             |
 | `limitations`      | `list[str]`          |             |
 
+## Lyric_text tools
+
+Guard one existing ordinary lyric without adding/removing or reformatting it.
+
+### `set_live_lyric_text`
+
+Change ONE existing ordinary SINGLE lyric's plain text, preserving notation.
+
+Pass a complete fresh chord snapshot from get_measure_content, including all
+ordered lyrics/articulations, and its ephemeral zero-based lyric_index.
+The snapshot is checked atomically before mutation. Native MuseScore 4.7+
+in major version 4 and a known empty master excerpt list are required.
+Only canonical plain XML lyric text with SINGLE syllabic, zero lyric ticks,
+no melisma and no lyric separator is eligible. No add/delete, verse, timing,
+syllabic, placement, rich formatting or symbol changes. Note/chord slurs are
+allowed only with unchanged exposed native spanner metadata.
+
+plain_text is literal Unicode, never XML: &, <, > and double quotes are
+escaped internally; apostrophes stay literal. Nonempty single-line valid
+scalars only, at most 512 characters, without controls/noncharacters or
+unpaired surrogates. No trimming or Unicode normalization. Actual native XML
+and decoded plain text must round-trip. Font/style/alignment/user offsets,
+visibility/autoplace and lyric timing are checked privately; response includes
+explicit verified field names without float appearance values. All exposed
+measure events across tracks and score-spanner metadata are checked unchanged
+outside the declared text edit. Equal text makes no undo entry; otherwise one.
+
+Selection/layout may change; logical bridge position is untouched. Snapshot
+scope is exposed target-chord fields, not global revision/identity, unexposed
+links or every engraving property. Identical contents in another score cannot
+be detected. Direct calls have no duplicate protection; use execute_mutation_once
+with kind set_lyric_text for retained caller ID/session history. Never replay
+an uncertain mutation blindly. No Dorico or sequence support.
+
+| Parameter     | Type                | Default    | Description |
+| ------------- | ------------------- | ---------- | ----------- |
+| `measure`     | `int`               | (required) |             |
+| `staff`       | `int`               | (required) |             |
+| `voice`       | `int`               | (required) |             |
+| `offset`      | `WholeNoteFraction` | (required) |             |
+| `lyric_index` | `int`               | (required) |             |
+| `plain_text`  | `str`               | (required) |             |
+| `expected`    | `ChordToneSnapshot` | (required) |             |
+
+**Returns** `LyricTextEdit`.
+
+| Field                    | Type                             | Description |
+| ------------------------ | -------------------------------- | ----------- |
+| `measure`                | `int`                            |             |
+| `lyric_index`            | `int`                            |             |
+| `before`                 | `PassageEvent`                   |             |
+| `after`                  | `PassageEvent`                   |             |
+| `selected_before`        | `NativeLyricText`                |             |
+| `selected_after`         | `NativeLyricText`                |             |
+| `verified`               | `bool`                           |             |
+| `mutation_status`        | `"applied" \| "unchanged"`       |             |
+| `snapshot_scope`         | `str`                            |             |
+| `selection_status`       | `"unchanged" \| "not_preserved"` |             |
+| `verified_native_fields` | `list[str]`                      |             |
+| `limitations`            | `list[str]`                      |             |
+
 ## Receipts tools
 
 Execute explicitly identified guarded mutations and retrieve their history.
@@ -887,8 +948,9 @@ the identical ID, session and complete payload returns retained history;
 changing the payload conflicts. This command is never automatically replayed.
 After a lost response or cancellation, explicitly retry the exact request or
 read its receipt. Never replace the session token automatically after restart.
-Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone and
-remove_chord_tone. The matching native command must be advertised; older
+Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone,
+remove_chord_tone and set_lyric_text. The matching native command must be
+advertised; older
 plugins reject unsupported kinds before sending. Direct mutation tools are
 not protected. Batch targets must be distinct chords, at most 32.
 
@@ -898,24 +960,24 @@ after undo or further edits, and are not verification of current score state.
 Pending/unknown IDs remain reserved. The bounded non-evicting ledger lasts
 only for that plugin instance. Native score identity is not established.
 
-| Parameter                 | Type                                                                                                                 | Default    | Description |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------- | ----------- |
-| `operation_id`            | `str`                                                                                                                | (required) |             |
-| `expected_plugin_session` | `str`                                                                                                                | (required) |             |
-| `mutation`                | `GuardedPitchMutation \| GuardedPitchBatchMutation \| GuardedAddChordToneMutation \| GuardedRemoveChordToneMutation` | (required) |             |
+| Parameter                 | Type                                                                                                                                             | Default    | Description |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ----------- |
+| `operation_id`            | `str`                                                                                                                                            | (required) |             |
+| `expected_plugin_session` | `str`                                                                                                                                            | (required) |             |
+| `mutation`                | `GuardedPitchMutation \| GuardedPitchBatchMutation \| GuardedAddChordToneMutation \| GuardedRemoveChordToneMutation \| GuardedLyricTextMutation` | (required) |             |
 
 **Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
 
-| Field            | Type                                                                                | Description                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `plugin_session` | `str`                                                                               |                                                                              |
-| `operation_id`   | `str`                                                                               |                                                                              |
-| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                              |                                                                              |
-| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| None` |                                                                              |
-| `cached`         | `bool`                                                                              | Lookup/retrieval response, not proof that an operation completed or applied. |
-| `historical`     | `bool`                                                                              |                                                                              |
-| `original_reply` | `dict \| None`                                                                      | Original native JSON fields, including errors, preserved in native casing.   |
-| `reason`         | `str \| None`                                                                       | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+| Field            | Type                                                                                                  | Description                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                                                                 |                                                                              |
+| `operation_id`   | `str`                                                                                                 |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                                                |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| "setLyricText" \| None` |                                                                              |
+| `cached`         | `bool`                                                                                                | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                                                                |                                                                              |
+| `original_reply` | `dict \| None`                                                                                        | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                                                                         | Bounded cause for an unknown receipt; no automatic retry is implied.         |
 
 ### `read_mutation_receipt`
 
@@ -934,16 +996,16 @@ a mutation and remains available when the non-evicting ledger is full.
 
 **Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
 
-| Field            | Type                                                                                | Description                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `plugin_session` | `str`                                                                               |                                                                              |
-| `operation_id`   | `str`                                                                               |                                                                              |
-| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                              |                                                                              |
-| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| None` |                                                                              |
-| `cached`         | `bool`                                                                              | Lookup/retrieval response, not proof that an operation completed or applied. |
-| `historical`     | `bool`                                                                              |                                                                              |
-| `original_reply` | `dict \| None`                                                                      | Original native JSON fields, including errors, preserved in native casing.   |
-| `reason`         | `str \| None`                                                                       | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+| Field            | Type                                                                                                  | Description                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                                                                 |                                                                              |
+| `operation_id`   | `str`                                                                                                 |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                                                |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| "setLyricText" \| None` |                                                                              |
+| `cached`         | `bool`                                                                                                | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                                                                |                                                                              |
+| `original_reply` | `dict \| None`                                                                                        | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                                                                         | Bounded cause for an unknown receipt; no automatic retry is implied.         |
 
 ## Generate tools
 
@@ -1201,6 +1263,13 @@ Every event in the fresh target voice's complete measure read.
 | `kind`    | `str`                 |             |
 | `request` | `AddChordToneRequest` |             |
 
+### `GuardedLyricTextMutation`
+
+| Field     | Type               | Description |
+| --------- | ------------------ | ----------- |
+| `kind`    | `str`              |             |
+| `request` | `LyricTextRequest` |             |
+
 ### `GuardedPitchBatchMutation`
 
 | Field     | Type                | Description |
@@ -1236,6 +1305,18 @@ Every event in the fresh target voice's complete measure read.
 | Field | Type | Description |
 | ----- | ---- | ----------- |
 
+### `LyricTextRequest`
+
+| Field         | Type                | Description |
+| ------------- | ------------------- | ----------- |
+| `measure`     | `int`               |             |
+| `staff`       | `int`               |             |
+| `voice`       | `int`               |             |
+| `offset`      | `WholeNoteFraction` |             |
+| `lyric_index` | `int`               |             |
+| `plain_text`  | `str`               |             |
+| `expected`    | `ChordToneSnapshot` |             |
+
 ### `MuseScoreDiagnostics`
 
 Negotiated plugin capabilities and the Python server's package version.
@@ -1248,6 +1329,19 @@ Negotiated plugin capabilities and the Python server's package version.
 | `sequence_commands` | `list[str]`                   | Commands accepted as steps of processSequence.                              |
 | `receipts`          | `ReceiptCapabilities \| None` | Optional receipt protocol; null plugins cannot execute receipted mutations. |
 | `server_version`    | `str`                         |                                                                             |
+
+### `NativeLyricText`
+
+Actual native string/timing metadata; no float appearance fields in receipts.
+
+| Field         | Type                | Description |
+| ------------- | ------------------- | ----------- |
+| `xml_text`    | `str`               |             |
+| `plain_text`  | `str`               |             |
+| `verse`       | `int`               |             |
+| `syllabic`    | `int`               |             |
+| `placement`   | `int`               |             |
+| `lyric_ticks` | `WholeNoteFraction` |             |
 
 ### `NativeTransposition`
 

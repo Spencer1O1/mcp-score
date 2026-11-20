@@ -32,6 +32,7 @@ from mcp_score.bridge.duration_edit import (
     DurationPolicy,
     ExpectedDurationEvent,
 )
+from mcp_score.bridge.lyric_text import LyricTextEdit, LyricTextRequest
 from mcp_score.bridge.note_rest import FillRestRequest, NoteRestEdit, ReplaceNoteRequest
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
@@ -95,6 +96,7 @@ class MuseScoreCommand(StrEnum):
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
+    SET_LYRIC_TEXT = "setLyricText"
     ADD_CHORD_TONE = "addChordTone"
     REMOVE_CHORD_TONE = "removeChordTone"
     SET_NOTE_PITCH = "setNotePitch"
@@ -234,6 +236,7 @@ class MuseScoreBridge(WebSocketBridge):
                     else None
                 )
                 commands = {
+                    "set_lyric_text": "setLyricText",
                     "add_chord_tone": "addChordTone",
                     "remove_chord_tone": "removeChordTone",
                     "set_note_pitch": "setNotePitch",
@@ -481,6 +484,16 @@ class MuseScoreBridge(WebSocketBridge):
         )
 
     # ── Writing ─────────────────────────────────────────────────────
+
+    async def set_lyric_text(self, request: LyricTextRequest) -> LyricTextEdit:
+        return await self._run(
+            LyricTextEdit,
+            MuseScoreCommand.SET_LYRIC_TEXT,
+            {
+                key: _camel_case_keys(value)
+                for key, value in request.model_dump().items()
+            },
+        )
 
     async def fill_rest_with_note(self, request: FillRestRequest) -> NoteRestEdit:
         return await self._run(

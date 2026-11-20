@@ -4,3 +4,4 @@ tests/integration/plugin/selection-fixture.js
 tests/integration/plugin/pitch-batch-fixture.js
 tests/integration/plugin/chord-tone-fixture.js
 tests/integration/plugin/note-rest-fixture.js
+tests/integration/plugin/lyric-text-fixture.js

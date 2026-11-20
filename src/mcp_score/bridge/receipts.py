@@ -8,6 +8,7 @@ from pydantic import Field, JsonValue, StrictBool, StrictInt, StrictStr, model_v
 
 # Pydantic evaluates nested input annotations at runtime.
 from mcp_score.bridge.chord_tone import AddChordToneRequest, RemoveChordToneRequest  # noqa: TC001
+from mcp_score.bridge.lyric_text import LyricTextRequest  # noqa: TC001
 from mcp_score.bridge.pitch import PitchEditRequest  # noqa: TC001
 from mcp_score.bridge.pitch_batch import PitchBatchRequest  # noqa: TC001
 from mcp_score.bridge.results import Result
@@ -16,6 +17,7 @@ __all__ = [
     "RECEIPT_PROTOCOL_VERSION",
     "OperationId",
     "PluginSession",
+    "GuardedLyricTextMutation",
     "GuardedAddChordToneMutation",
     "GuardedRemoveChordToneMutation",
     "GuardedPitchMutation",
@@ -43,6 +45,11 @@ class ReceiptIdentity(Result):
     """Session from connection diagnostics; never replaced automatically on retry."""
 
 
+class GuardedLyricTextMutation(Result):
+    kind: Literal["set_lyric_text"]
+    request: LyricTextRequest
+
+
 class GuardedPitchMutation(Result):
     kind: Literal["set_note_pitch"]
     request: PitchEditRequest
@@ -67,7 +74,8 @@ ReceiptMutation = Annotated[
     GuardedPitchMutation
     | GuardedPitchBatchMutation
     | GuardedAddChordToneMutation
-    | GuardedRemoveChordToneMutation,
+    | GuardedRemoveChordToneMutation
+    | GuardedLyricTextMutation,
     Field(discriminator="kind"),
 ]
 
@@ -95,7 +103,13 @@ class MutationReceipt(Result):
     operation_id: OperationId
     status: Literal["not_found", "pending", "completed", "unknown"]
     command: (
-        Literal["setNotePitch", "setNotePitches", "addChordTone", "removeChordTone"]
+        Literal[
+            "setNotePitch",
+            "setNotePitches",
+            "addChordTone",
+            "removeChordTone",
+            "setLyricText",
+        ]
         | None
     )
     cached: StrictBool
@@ -118,6 +132,7 @@ class MutationReceipt(Result):
             "setNotePitches",
             "addChordTone",
             "removeChordTone",
+            "setLyricText",
         }:
             raise ValueError("Reserved receipt must identify its command")
         if (self.status == "completed") != (self.original_reply is not None):
