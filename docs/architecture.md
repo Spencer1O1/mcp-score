@@ -102,6 +102,42 @@ retain their plain message. Tool error status remains an error, not success.
 
 `bridge/registry.py` holds one bridge per application and tracks the active one. `BridgeRegistry.activate(bridge)` disconnects whichever bridge was active, then connects the new one, so a failed connection leaves nothing active; `deactivate(bridge)` disconnects it; `connected()` returns the active bridge only while it is connected. There is no module-level registry: `server.py` creates one per server and hands it to the tools as `AppState` through the SDK's context injection (`context.py`). `require_bridge(context)` in `tools/base.py` reads the connected bridge from it and raises `ToolError` when nothing is connected.
 
+### Concurrent requests and operation ownership
+
+Each context-bearing live-app tool owns one registry operation and the active
+bridge's operation scope from entry to completion. This includes navigation, staff selection, the edit itself, and
+connection changes. A second tool cannot change the shared logical cursor or
+switch the active application partway through that workflow. Generation and
+offline rendering tools have no score context and do not acquire this scope.
+
+Lock order is registry workflow, bridge operation, then transport I/O. Registry
+activation/deactivation and bridge connect/disconnect/exchange share their
+respective operation scopes. Connection tools acquire ownership of the target
+bridge before assigning its endpoint, even when that bridge is not active. Those scopes allow nesting only within the owning
+asyncio task, so a connect inside a tool or reconnect inside an exchange does
+not deadlock. Child tasks do not inherit ownership; a caller must not await a
+child operation while retaining the scope that child needs.
+
+The transport serializes each complete send/receive pair. A failed or cancelled
+in-flight request discards its connection before releasing ownership, so a late
+response cannot become the next request's result. Queued transport callers fail
+without sending after that discard; they must explicitly open a fresh connection.
+Original transport failure metadata is preserved. Handshake and disconnect
+cancellation also close their transports, and cancelled lock waiters do not
+acquire ownership. Cancellation propagates as cancellation; it does not prove
+that a mutation failed, confirm rollback, or make a manual retry safe. A tool
+whose connection was discarded must explicitly reconnect before another live
+operation. The existing safe-read retry and unknown-mutation-outcome policies
+continue to apply to transport failures.
+
+These scopes coordinate coroutines using one server's registry and bridges.
+They do not lock the MuseScore UI, another MCP server, or another process.
+Direct library users performing a sequence of cursor-dependent calls must own
+`registry.operation()` around the complete sequence when sharing a registry,
+or `bridge.operation()` for standalone WebSocket bridge use. Serializing
+individual exchanges alone does not make such a sequence atomic. Score identity and revision preconditions remain
+necessary to detect external changes.
+
 ### Remote Control protocol (Dorico)
 
 Dorico 4+ implements a "Remote Control" WebSocket protocol. The protocol logic lives in `bridge/remote_control.py`, separate from Dorico's defaults in `bridge/dorico.py`.
