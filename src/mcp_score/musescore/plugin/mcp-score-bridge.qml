@@ -26,6 +26,7 @@ import "current-selection.js" as CurrentSelection
 import "editing.js" as Editing
 import "pitch.js" as Pitch
 import "pitch-batch.js" as PitchBatch
+import "chord-tone.js" as ChordTone
 import "duration.js" as DurationEdit
 import "rhythm.js" as Rhythm
 import "selection.js" as Selection
@@ -77,6 +78,8 @@ MuseScore {
         "addNote":              Editing.addNote,
         "setNotePitch":         Pitch.setNotePitch,
         "setNotePitches":       PitchBatch.setNotePitches,
+        "addChordTone":         ChordTone.addChordTone,
+        "removeChordTone":      ChordTone.removeChordTone,
         "setEventDuration":     DurationEdit.setEventDuration,
         "extendEventDuration":  DurationEdit.extendEventDuration,
         "fillRestWithNote":     Rhythm.fillRestWithNote,

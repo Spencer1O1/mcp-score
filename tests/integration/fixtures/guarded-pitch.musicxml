@@ -122,6 +122,8 @@
         <type>half</type>
         <dot />
         <staff>1</staff>
+        <notations><articulations><staccato /></articulations></notations>
+        <lyric number="1"><syllabic>single</syllabic><text>keep chord</text></lyric>
       </note>
       <note>
         <chord />

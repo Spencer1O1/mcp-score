@@ -170,6 +170,18 @@ Source/package files remain unchanged, the normal handshake lacks these test
 commands, and the next startup restores production files. Cleanup never sends
 an undo after an uncertain, failed or previously attempted undo.
 
+The same restarted pitch phase can separately opt into
+`MUSESCORE_CHORD_TONE_TEST_SETUP=1`. Fixed no-argument add/remove arms and a
+primitive-state read command are installed only in the marked owned copy.
+Unique post-add/remove insertion points record actual native chord cardinality
+and pitches, then throw once after a demonstrated structural change. The test
+requires full target/passage restoration and preservation of its prior own
+sentinel undo entry. Every QML/module sentinel and unlinked owned destination is
+validated before fault writes. Source/package code stays unchanged; normal
+handshakes lack the test commands and the next startup restores production.
+No arbitrary code/fault parameters or production hooks exist, and failure or
+uncertainty never authorizes a cleanup undo.
+
 `stop` retains the marked artifacts and logs for inspection. Collect them before
 removing the profile:
 

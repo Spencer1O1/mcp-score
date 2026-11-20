@@ -21,6 +21,11 @@ from mcp_score.bridge.capabilities import (
     MuseScoreDiagnostics,
     PluginCapabilities,
 )
+from mcp_score.bridge.chord_tone import (
+    AddChordToneRequest,
+    ChordToneEdit,
+    RemoveChordToneRequest,
+)
 from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.duration_edit import (
     DurationEdit,
@@ -90,6 +95,8 @@ class MuseScoreCommand(StrEnum):
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
+    ADD_CHORD_TONE = "addChordTone"
+    REMOVE_CHORD_TONE = "removeChordTone"
     SET_NOTE_PITCH = "setNotePitch"
     SET_NOTE_PITCHES = "setNotePitches"
     SET_EVENT_DURATION = "setEventDuration"
@@ -227,6 +234,8 @@ class MuseScoreBridge(WebSocketBridge):
                     else None
                 )
                 commands = {
+                    "add_chord_tone": "addChordTone",
+                    "remove_chord_tone": "removeChordTone",
                     "set_note_pitch": "setNotePitch",
                     "set_note_pitches": "setNotePitches",
                 }
@@ -414,6 +423,20 @@ class MuseScoreBridge(WebSocketBridge):
     async def execute_mutation_once(self, request: ReceiptExecution) -> MutationReceipt:
         return await self._receipt_request(
             MuseScoreCommand.EXECUTE_MUTATION_ONCE, request
+        )
+
+    async def add_chord_tone(self, request: AddChordToneRequest) -> ChordToneEdit:
+        return await self._run(
+            ChordToneEdit,
+            MuseScoreCommand.ADD_CHORD_TONE,
+            cast("dict[str, Any]", _camel_case_keys(request.model_dump())),
+        )
+
+    async def remove_chord_tone(self, request: RemoveChordToneRequest) -> ChordToneEdit:
+        return await self._run(
+            ChordToneEdit,
+            MuseScoreCommand.REMOVE_CHORD_TONE,
+            cast("dict[str, Any]", _camel_case_keys(request.model_dump())),
         )
 
     async def set_note_pitches(self, request: PitchBatchRequest) -> PitchBatchEdit:

@@ -180,6 +180,12 @@ class TestMuseScoreBridgeCapabilities:
             assert diagnostics.protocol_version == 1
             assert "getScore" in diagnostics.commands
             assert "readCurrentSelection" in diagnostics.commands
+            assert "addChordTone" in diagnostics.commands
+            assert "removeChordTone" in diagnostics.commands
+            assert "addChordTone" not in diagnostics.sequence_commands
+            assert "removeChordTone" not in diagnostics.sequence_commands
+            assert "_testArmChordToneAdd" not in diagnostics.commands
+            assert "_testArmChordToneRemove" not in diagnostics.commands
             assert "setNotePitches" in diagnostics.commands
             assert "setNotePitches" not in diagnostics.sequence_commands
             assert "_testArmPitchBatchFault" not in diagnostics.commands

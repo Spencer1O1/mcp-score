@@ -1464,3 +1464,112 @@ class TestPitchBatchFixtureDriver:
         with pytest.raises(harness.HarnessError, match="linked"):
             harness._install_pitch_batch_fixture(layout)
         assert outside.read_text() == "unchanged"
+
+
+class TestChordToneFixtureDriver:
+    @pytest.mark.parametrize("operation", ["add", "remove"])
+    def test_only_owned_copy_faults_after_actual_change_then_next_seed_restores(
+        self, tmp_path: Path, operation: str
+    ) -> None:
+        from tests.test_chord_tone_plugin import _execute
+
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        source = _HARNESS_PATH.parent.parent / "src/mcp_score/musescore/plugin"
+        original = {
+            path.name: path.read_bytes() for path in source.iterdir() if path.is_file()
+        }
+        directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+        # Both independent opt-ins can coexist in the same fresh fixture phase.
+        harness._install_pitch_batch_fixture(layout)
+        harness._install_chord_tone_fixture(layout)
+        assert {
+            path.name: path.read_bytes() for path in source.iterdir() if path.is_file()
+        } == original
+        assert '"_testArmChordToneAdd"' in (directory / PLUGIN_QML_NAME).read_text()
+        assert '"_testArmPitchBatchFault"' in (directory / PLUGIN_QML_NAME).read_text()
+        assert "chordToneFault" not in original["chord-tone.js"].decode()
+        assert not (source / "chord-tone-fixture.js").exists()
+        observed = _execute(
+            f"operation='{operation}';ChordToneFixture.arm"
+            + ("Add" if operation == "add" else "Remove")
+            + "(plugin,{});",
+            output="({run:toneRun(),fault:plugin.chordToneFault})",
+            module_source=(directory / "chord-tone.js").read_text(),
+        )
+        assert observed["run"]["reply"]["mutation_status"] == "rolled_back"
+        assert observed["run"]["before"] == observed["run"]["actual"]
+        assert observed["run"]["starts"] == observed["run"]["cancels"] == 1
+        assert observed["fault"]["armed"] is False
+        assert observed["fault"]["observed"] == {
+            "beforeCount": 2,
+            "afterCount": 3 if operation == "add" else 1,
+            "pitches": [60, 64, 67] if operation == "add" else [64],
+        }
+        harness.seed_configuration(layout)
+        assert (directory / PLUGIN_QML_NAME).read_bytes() == original[PLUGIN_QML_NAME]
+        assert (directory / "chord-tone.js").read_bytes() == original["chord-tone.js"]
+        assert not (directory / "chord-tone-fixture.js").exists()
+
+    @pytest.mark.parametrize(
+        "file,needle",
+        [
+            (PLUGIN_QML_NAME, 'import "chord-tone.js" as ChordTone'),
+            (PLUGIN_QML_NAME, "property var receiptState: null"),
+            (PLUGIN_QML_NAME, '"removeChordTone":      ChordTone.removeChordTone,'),
+            ("chord-tone.js", '.import "score.js" as Score'),
+            ("chord-tone.js", "resolved.chord.add(added);"),
+            (
+                "chord-tone.js",
+                "resolved.chord.remove(resolved.chord.notes[params.noteIndex]);",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("duplicate", [False, True])
+    def test_every_sentinel_checked_before_any_fault_write(
+        self, tmp_path: Path, file: str, needle: str, duplicate: bool
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+        path = directory / file
+        path.write_text(
+            path.read_text().replace(needle, needle * 2 if duplicate else "")
+        )
+        before = {
+            path.name: path.read_bytes()
+            for path in directory.iterdir()
+            if path.is_file()
+        }
+        with pytest.raises(harness.HarnessError, match="sentinel"):
+            harness._install_chord_tone_fixture(layout)
+        assert {
+            path.name: path.read_bytes()
+            for path in directory.iterdir()
+            if path.is_file()
+        } == before
+
+    @pytest.mark.parametrize(
+        "destination", [PLUGIN_QML_NAME, "chord-tone.js", "chord-tone-fixture.js"]
+    )
+    def test_unowned_or_linked_destination_refused(
+        self, tmp_path: Path, destination: str
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.seed_configuration(layout)
+        with pytest.raises(harness.HarnessError, match="marked owned"):
+            harness._install_chord_tone_fixture(layout)
+        (layout.root / harness.PROFILE_MARKER).write_text(
+            harness.PROFILE_MARKER_CONTENT
+        )
+        outside = tmp_path / "outside.js"
+        outside.write_text("untouched")
+        target = layout.plugins_dir / PLUGIN_DIRECTORY_NAME / destination
+        if target.exists():
+            target.unlink()
+        target.symlink_to(outside)
+        with pytest.raises(harness.HarnessError, match="linked"):
+            harness._install_chord_tone_fixture(layout)
+        assert outside.read_text() == "untouched"

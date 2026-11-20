@@ -14,6 +14,12 @@ from typing import TYPE_CHECKING
 
 from pydantic import StrictInt, ValidationError
 
+from mcp_score.bridge.chord_tone import (
+    AddChordToneRequest,
+    ChordToneEdit,
+    ChordToneSnapshot,
+    RemoveChordToneRequest,
+)
 from mcp_score.bridge.duration_edit import (
     DurationEdit,
     DurationEditRequest,
@@ -96,6 +102,104 @@ async def add_live_note(
     return await bridge.add_note(
         pitch, Duration(numerator=numerator, denominator=denominator)
     )
+
+
+@score_tool
+async def add_live_chord_tone(
+    context: ScoreContext,
+    measure: StrictInt,
+    staff: StrictInt,
+    voice: StrictInt,
+    offset: WholeNoteFraction,
+    pitch: StrictInt,
+    tpc: StrictInt,
+    expected: ChordToneSnapshot,
+) -> ChordToneEdit:
+    """Match a complete live chord snapshot and add one ordinary sounding tone.
+
+    All exposed expected metadata is required and compared, including nullable
+    text/lyrics/articulations. Existing notes, rhythm and exposed metadata are
+    preserved; duplicate sounding pitches and inconsistent native transposition
+    intervals reject before mutation. Written TPC derives from unanimous native
+    peer intervals, without a written-octave guess or concert-mode change.
+    One native undo command; no navigation or automatic replay. Known-open
+    command cancellation is verified by a fresh full target snapshot. Commit
+    uncertainty is unknown; known committed failures are applied_unverified.
+    UI selection/layout are not preserved; logical cursor is untouched. Scope
+    is target contents, without score identity, revision or non-target claims.
+    Use execute_mutation_once kind add_chord_tone for duplicate protection;
+    this direct tool has none. Not available with Dorico.
+
+    Args:
+        measure: Ordinal measure (1-indexed).
+        staff: Staff index (0-indexed).
+        voice: Voice index (0-3).
+        offset: Exact onset as a whole-note fraction.
+        pitch: New sounding MIDI pitch (0-127).
+        tpc: Concert spelling (-1 to 33), consistent with pitch.
+        expected: Complete fresh live chord event, with all exposed metadata.
+    """
+    try:
+        request = AddChordToneRequest(
+            measure=measure,
+            staff=staff,
+            voice=voice,
+            offset=offset,
+            pitch=pitch,
+            tpc=tpc,
+            expected=expected,
+        )
+    except ValidationError as error:
+        raise ToolError(f"Invalid chord-tone request: {error}") from error
+    return await require_bridge(context).add_chord_tone(request)
+
+
+@score_tool
+async def remove_live_chord_tone(
+    context: ScoreContext,
+    measure: StrictInt,
+    staff: StrictInt,
+    voice: StrictInt,
+    offset: WholeNoteFraction,
+    note_index: StrictInt,
+    expected: ChordToneSnapshot,
+) -> ChordToneEdit:
+    """Match a complete live chord snapshot and remove one tone, retaining rhythm.
+
+    Requires at least two tones and the ordinary pitched-chord eligibility of
+    guarded pitch edits. The removed tone must have verified empty native child
+    and spanner lists; missing metadata rejects (MuseScore 4.4 cannot remove).
+    The selected wrapper is never accessed after deletion; verification and
+    rollback use freshly resolved native contents. All exposed expected fields
+    are required and compared; surviving notes, lyrics and articulations remain.
+    One native undo step. Cancellation only affects its known open command and
+    rolled_back requires a full target reread; uncertain commit is unknown and
+    known committed verification failures remain applied_unverified. No global
+    undo, automatic replay, sequence embedding, score identity or revision claim.
+    UI selection/layout are not preserved; logical cursor is untouched. Use
+    execute_mutation_once kind remove_chord_tone for caller-retained duplicate
+    protection; this direct tool has none. Not available with Dorico.
+
+    Args:
+        measure: Ordinal measure (1-indexed).
+        staff: Staff index (0-indexed).
+        voice: Voice index (0-3).
+        offset: Exact onset as a whole-note fraction.
+        note_index: Ephemeral tone index in the complete expected snapshot.
+        expected: Complete fresh live chord event, with all exposed metadata.
+    """
+    try:
+        request = RemoveChordToneRequest(
+            measure=measure,
+            staff=staff,
+            voice=voice,
+            offset=offset,
+            note_index=note_index,
+            expected=expected,
+        )
+    except ValidationError as error:
+        raise ToolError(f"Invalid chord-tone request: {error}") from error
+    return await require_bridge(context).remove_chord_tone(request)
 
 
 @score_tool
@@ -460,6 +564,8 @@ async def undo_last_action(context: ScoreContext) -> CursorPosition:
 def register(server: MCPServer) -> None:
     for tool in (
         add_live_note,
+        add_live_chord_tone,
+        remove_live_chord_tone,
         set_live_note_pitch,
         set_live_note_pitches,
         set_live_event_duration,

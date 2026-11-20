@@ -29,6 +29,8 @@ _REQUIRED_TOOLS = {
     "read_passage",
     "get_event_at_position",
     "read_current_selection",
+    "add_live_chord_tone",
+    "remove_live_chord_tone",
     "set_live_note_pitch",
     "set_live_event_duration",
 }
@@ -91,6 +93,7 @@ async def probe_installed(manifest_file: Path) -> dict[str, object]:
             )
         assert "_testSelectionSetup" not in resource.read_text(), resource
     assert not (plugin / "selection-fixture.js").exists()
+    assert not (plugin / "chord-tone-fixture.js").exists()
 
     probe_root = manifest_file.parent / "installed-probe"
     probe_root.mkdir()  # Never adopt or replace a pre-existing directory.

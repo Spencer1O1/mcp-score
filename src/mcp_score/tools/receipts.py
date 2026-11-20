@@ -30,7 +30,7 @@ async def execute_mutation_once(
     expected_plugin_session: PluginSession,
     mutation: ReceiptMutation,
 ) -> MutationReceipt:
-    """Execute one guarded pitch request or batch with a caller-retained ID.
+    """Execute one supported guarded mutation with a caller-retained ID.
 
     Create and retain a unique operation_id BEFORE the first call. Obtain the
     plugin session from connect_to_musescore/get_musescore_bridge_info. Repeating
@@ -38,8 +38,10 @@ async def execute_mutation_once(
     changing the payload conflicts. This command is never automatically replayed.
     After a lost response or cancellation, explicitly retry the exact request or
     read its receipt. Never replace the session token automatically after restart.
-    Only set_note_pitch and set_note_pitches are supported; legacy mutation
-    tools are not protected. Batch targets must be distinct chords, at most 32.
+    Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone and
+    remove_chord_tone. The matching native command must be advertised; older
+    plugins reject unsupported kinds before sending. Direct mutation tools are
+    not protected. Batch targets must be distinct chords, at most 32.
 
     Receipt completion means an original native reply was retained, including
     errors; it does not mean the edit succeeded. Replies are HISTORICAL, including
