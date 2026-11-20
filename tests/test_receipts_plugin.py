@@ -55,6 +55,9 @@ def test_canonical_payload_executes_once_and_returns_history() -> None:
     result = _execute(r"""
 const first=execute();
 request.mutation.request=Object.fromEntries(Object.entries(params).reverse());
+request.mutation.request.expected=Object.fromEntries(Object.entries(params.expected).reverse());
+request.mutation.request.expected.notes=params.expected.notes.map(
+ note=>Object.fromEntries(Object.entries(note).reverse()));
 const again=execute();
 const saved=plugin.receiptState.entries[request.operationId].replyJson;
 again.result.originalReply.result.after.notes[0].name='corrupted copy';
@@ -178,6 +181,9 @@ console.log(JSON.stringify({retry,read,calls,fresh:old!==plugin.receiptState.ses
         "request.mutation.request.offset.numerator=9007199254740992;",
         "request.mutation.request.pitch=Infinity;",
         "request.mutation.request.extra='x'.repeat(70000);",
+        "request.mutation.request.extra=Array(17000).fill(1);",
+        "let nested={};request.mutation.request.extra=nested;"
+        "for(let i=0;i<40;i++){nested.child={};nested=nested.child;}",
         "request.mutation.request.extra=()=>true;",
     ],
 )

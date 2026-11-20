@@ -11,6 +11,7 @@ from mcp_score.bridge.pitch import PitchEditRequest  # noqa: TC001
 from mcp_score.bridge.results import Result
 
 __all__ = [
+    "RECEIPT_PROTOCOL_VERSION",
     "OperationId",
     "PluginSession",
     "GuardedPitchMutation",
@@ -19,6 +20,8 @@ __all__ = [
     "ReceiptCapabilities",
     "MutationReceipt",
 ]
+
+RECEIPT_PROTOCOL_VERSION = 1
 
 OperationId = Annotated[
     StrictStr,

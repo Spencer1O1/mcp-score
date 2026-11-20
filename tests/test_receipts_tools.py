@@ -288,3 +288,41 @@ async def test_inconsistent_receipt_advertisement_rejects_handshake(
     assert [payload["command"] for payload in sent_payloads(connection)] == [
         "getCapabilities"
     ]
+
+
+@pytest.mark.anyio()
+async def test_mcp_execute_and_lookup_publish_structured_historical_native_reply(
+    registry: BridgeRegistry,
+    context: ScoreContext,
+) -> None:
+    connection = fake_connection(MUSESCORE_HANDSHAKE, _reply(), _reply(cached=True))
+    with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
+        assert await registry.activate(registry.musescore)
+        server = create_server(registry)
+        executed = await server.call_tool(
+            "execute_mutation_once", _request().model_dump(), context=context
+        )
+        looked_up = await server.call_tool(
+            "read_mutation_receipt",
+            {
+                "operation_id": _request().operation_id,
+                "expected_plugin_session": _request().expected_plugin_session,
+            },
+            context=context,
+        )
+    assert executed.structured_content is not None
+    assert looked_up.structured_content is not None
+    assert executed.structured_content["original_reply"] == {
+        "result": {"mutationStatus": "applied"}
+    }
+    assert looked_up.structured_content["historical"] is True
+    assert looked_up.structured_content["cached"] is True
+    assert (
+        looked_up.structured_content["original_reply"]
+        == executed.structured_content["original_reply"]
+    )
+    assert [message["command"] for message in sent_payloads(connection)] == [
+        "getCapabilities",
+        "executeMutationOnce",
+        "readMutationReceipt",
+    ]

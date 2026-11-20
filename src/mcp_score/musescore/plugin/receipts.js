@@ -29,7 +29,10 @@ function capabilities(plugin) {
 
 function failure(params, code, message) {
     return {error: message, code: code,
-        operation_id: params.operationId, expected_plugin_session: params.expectedPluginSession,
+        operation_id: typeof params.operationId === "string" && params.operationId.length <= 128
+            ? params.operationId : null,
+        expected_plugin_session: typeof params.expectedPluginSession === "string"
+            && params.expectedPluginSession.length <= 128 ? params.expectedPluginSession : null,
         this_attempt_status: "not_executed", prior_outcome: "not_established"};
 }
 

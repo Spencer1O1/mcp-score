@@ -25,7 +25,12 @@ from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
-from mcp_score.bridge.receipts import MutationReceipt, ReceiptExecution, ReceiptIdentity
+from mcp_score.bridge.receipts import (
+    RECEIPT_PROTOCOL_VERSION,
+    MutationReceipt,
+    ReceiptExecution,
+    ReceiptIdentity,
+)
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -142,7 +147,7 @@ class MuseScoreBridge(WebSocketBridge):
             )
         if (
             capabilities.receipts is not None
-            and capabilities.receipts.protocol_version != 1
+            and capabilities.receipts.protocol_version != RECEIPT_PROTOCOL_VERSION
         ):
             raise TransportError(
                 f"Unsupported mutation receipt protocol. {PLUGIN_UPGRADE_HINT}"
@@ -184,7 +189,7 @@ class MuseScoreBridge(WebSocketBridge):
             MuseScoreCommand.READ_MUTATION_RECEIPT,
         }:
             receipt = capabilities.receipts
-            if receipt is None or receipt.protocol_version != 1:
+            if receipt is None or receipt.protocol_version != RECEIPT_PROTOCOL_VERSION:
                 raise BridgeError(
                     "MuseScore plugin does not support receipt protocol 1. "
                     f"{PLUGIN_UPGRADE_HINT}"
@@ -319,12 +324,16 @@ class MuseScoreBridge(WebSocketBridge):
         self, action: MuseScoreCommand, request: ReceiptIdentity
     ) -> MutationReceipt:
         params = cast("dict[str, Any]", _camel_case_keys(request.model_dump()))
-        params["receiptVersion"] = 1
+        params["receiptVersion"] = RECEIPT_PROTOCOL_VERSION
         try:
             reply = await self.send_command(action, params)
             result = reply.get("result")
             if not isinstance(result, dict):
-                raise BridgeError("Plugin returned an invalid mutation receipt.")
+                raise BridgeError(
+                    "Plugin returned an invalid mutation receipt.",
+                    code="invalid_mutation_receipt",
+                    mutation_status="unknown",
+                )
             result = cast("dict[str, Any]", result)
             original = result.get("originalReply")
             envelope = cast(
