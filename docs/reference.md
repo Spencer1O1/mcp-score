@@ -135,60 +135,67 @@ No parameters.
 
 ## Analysis tools
 
-Analysis tools: read from the connected application.
-
-MuseScore reports what sits under its cursor; the tools move the cursor
-measure by measure, so a passage comes back as one entry per measure with
-the element at the start of that measure. Dorico's Remote Control API has
-no cursor: the only thing it can read is the selection's properties.
+Read live musical contents independently of the application's cursor.
 
 ### `read_passage`
 
-Read a range of measures in the live score, one entry per measure.
+Read every rhythmic event in an inclusive range of live MuseScore measures.
 
-For each measure MuseScore reports the cursor position (measure, staff,
-voice, beat, tick) and the element at the start of the measure on that
-staff: its type, and for a note or chord its pitches and duration. It
-does not list every element in the measure. Not available with Dorico,
-which cannot read score content.
+Returns chords, rests, concert pitch names, exact offsets and durations
+across all requested staves and voices, including unsaved changes. Does
+not move the selection or the bridge's logical cursor. Other segment
+elements and annotations include their type and text where available.
+The result lists notation details not yet serialized in `unsupported`;
+`range_complete` describes traversal, not full notation fidelity.
+Oversize reads fail without returning a truncated passage; request a
+smaller range. Not available with Dorico or an older MuseScore plugin.
 
-| Parameter       | Type          | Default    | Description                                                |
-| --------------- | ------------- | ---------- | ---------------------------------------------------------- |
-| `start_measure` | `int`         | (required) | First measure to read (1-indexed).                         |
-| `end_measure`   | `int`         | (required) | Last measure to read (inclusive, 1-indexed).               |
-| `staff`         | `int \| None` | `None`     | Staff to read (0-indexed). Omit to read the current staff. |
+| Parameter       | Type          | Default    | Description                                              |
+| --------------- | ------------- | ---------- | -------------------------------------------------------- |
+| `start_measure` | `int`         | (required) | First ordinal measure (1-indexed, repeats not expanded). |
+| `end_measure`   | `int`         | (required) | Last ordinal measure (inclusive, 1-indexed).             |
+| `staff`         | `int \| None` | `None`     | Staff index (0-indexed). Omit to read all staves.        |
+| `voice`         | `int \| None` | `None`     | Voice index (0-3). Omit to read all voices.              |
 
-**Returns** `Passage`.
+**Returns** `Passage`: Live events across an inclusive measure range, without moving selection.
 
-| Field           | Type                   | Description                                                 |
-| --------------- | ---------------------- | ----------------------------------------------------------- |
-| `start_measure` | `int`                  |                                                             |
-| `end_measure`   | `int`                  |                                                             |
-| `staff`         | `int \| None`          |                                                             |
-| `elements`      | `list[MeasureContent]` |                                                             |
-| `warning`       | `str \| None`          | Why the application could not read more, when it could not. |
+| Field            | Type                   | Description                                                                |
+| ---------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `source`         | `str`                  |                                                                            |
+| `start_measure`  | `int`                  |                                                                            |
+| `end_measure`    | `int`                  |                                                                            |
+| `staves`         | `list[int]`            |                                                                            |
+| `voices`         | `list[int]`            |                                                                            |
+| `measures`       | `list[PassageMeasure]` |                                                                            |
+| `range_complete` | `bool`                 | Whether every requested measure and rhythmic event was traversed.          |
+| `unsupported`    | `list[str]`            | Notation details not serialized, even when the rhythmic range is complete. |
 
 ### `get_measure_content`
 
-Select one measure of one staff in MuseScore and report the selection.
+Read the complete rhythmic contents of a live MuseScore measure.
 
-The selection becomes visible in the score, ready for a manual edit;
-the result names the selected measure and staff, not its content (use
-read_passage for that). Not available with Dorico, which cannot move to
-a staff or select a measure.
+Uses the same event schema and notation limitations as read_passage.
+Includes unsaved changes without selecting the measure or moving the
+bridge cursor. Not available with Dorico or an older MuseScore plugin.
 
-| Parameter | Type  | Default    | Description                          |
-| --------- | ----- | ---------- | ------------------------------------ |
-| `measure` | `int` | (required) | Measure number (1-indexed).          |
-| `staff`   | `int` | `0`        | Staff index (0-indexed, default: 0). |
+| Parameter | Type          | Default    | Description                                               |
+| --------- | ------------- | ---------- | --------------------------------------------------------- |
+| `measure` | `int`         | (required) | Ordinal measure number (1-indexed, repeats not expanded). |
+| `staff`   | `int \| None` | `None`     | Staff index (0-indexed). Omit to read all staves.         |
+| `voice`   | `int \| None` | `None`     | Voice index (0-3). Omit to read all voices.               |
 
-**Returns** `Selected`: A measure of a staff is selected in the application.
+**Returns** `Passage`: Live events across an inclusive measure range, without moving selection.
 
-| Field     | Type          | Description                 |
-| --------- | ------------- | --------------------------- |
-| `measure` | `int`         | Measure number (1-indexed). |
-| `staff`   | `int`         | Staff index (0-indexed).    |
-| `warning` | `str \| None` |                             |
+| Field            | Type                   | Description                                                                |
+| ---------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `source`         | `str`                  |                                                                            |
+| `start_measure`  | `int`                  |                                                                            |
+| `end_measure`    | `int`                  |                                                                            |
+| `staves`         | `list[int]`            |                                                                            |
+| `voices`         | `list[int]`            |                                                                            |
+| `measures`       | `list[PassageMeasure]` |                                                                            |
+| `range_complete` | `bool`                 | Whether every requested measure and rhythmic event was traversed.          |
+| `unsupported`    | `list[str]`            | Notation details not serialized, even when the rhythmic range is complete. |
 
 ### `get_selection_properties`
 
@@ -572,13 +579,6 @@ What sits at the cursor: a chord, a rest, a single note or something else.
 | `tpc`      | `int \| None`        | Tonal pitch class of a single note.  |
 | `name`     | `str \| None`        | Name of a single note.               |
 
-### `MeasureContent`
-
-| Field     | Type         | Description                                                   |
-| --------- | ------------ | ------------------------------------------------------------- |
-| `measure` | `int`        |                                                               |
-| `content` | `CursorInfo` | The cursor at the start of the measure and the element there. |
-
 ### `MuseScoreDiagnostics`
 
 Negotiated plugin capabilities and the Python server's package version.
@@ -606,6 +606,46 @@ Negotiated plugin capabilities and the Python server's package version.
 | `name`        | `str` |                                                |
 | `start_staff` | `int` | First staff of the part (0-indexed).           |
 | `end_staff`   | `int` | Last staff of the part (0-indexed, inclusive). |
+
+### `PassageEvent`
+
+An element at an exact position in the live score.
+
+| Field             | Type                           | Description                                                          |
+| ----------------- | ------------------------------ | -------------------------------------------------------------------- |
+| `kind`            | `"chord" \| "rest" \| "other"` |                                                                      |
+| `type`            | `int`                          | MuseScore's element type code.                                       |
+| `staff`           | `int`                          | Staff index, starting at zero.                                       |
+| `voice`           | `int`                          | Voice index, starting at zero.                                       |
+| `tick`            | `int`                          |                                                                      |
+| `offset`          | `Duration`                     | Exact offset from the measure start, as a fraction of a whole note.  |
+| `duration`        | `Duration \| None`             | Notated length, including dots; null for non-rhythmic elements.      |
+| `actual_duration` | `Duration \| None`             | Elapsed score time, including tuplet scaling; null when unavailable. |
+| `notes`           | `list[PassageNote]`            |                                                                      |
+| `text`            | `str \| None`                  | Text of an annotation, where exposed by MuseScore.                   |
+
+### `PassageMeasure`
+
+One measure across the requested staves and voices.
+
+| Field             | Type                    | Description                                                               |
+| ----------------- | ----------------------- | ------------------------------------------------------------------------- |
+| `measure`         | `int`                   | Ordinal measure number, starting at one, without expanding repeats.       |
+| `tick`            | `int`                   | Absolute measure start in MuseScore ticks.                                |
+| `actual_duration` | `Duration \| None`      | Actual measure length, as a fraction of a whole note (including pickups). |
+| `time_signature`  | `TimeSignature \| None` | Nominal meter, where exposed; never inferred from the measure length.     |
+| `events`          | `list[PassageEvent]`    |                                                                           |
+
+### `PassageNote`
+
+A chord tone, with concert pitch spelling independent of display mode.
+
+| Field           | Type  | Description                                                           |
+| --------------- | ----- | --------------------------------------------------------------------- |
+| `pitch`         | `int` | Sounding MIDI pitch; 60 is middle C.                                  |
+| `tpc`           | `int` | Concert tonal pitch class (MuseScore tpc1).                           |
+| `name`          | `str` | Concert spelling and octave, for example C#4 or Db4.                  |
+| `displayed_tpc` | `int` | TPC in the current concert/transposed display mode; not a MIDI pitch. |
 
 ### `TimeSignature`
 
