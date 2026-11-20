@@ -92,8 +92,9 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
+          MCP_SCORE_PUBLIC_WORKFLOW_FIXTURE: "1"
           MCP_SCORE_SELECTION_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py tests/integration/test_public_mcp_workflow.py -v
 
       - name: Start guarded pitch fixture
         run: |
@@ -203,8 +204,9 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
+          MCP_SCORE_PUBLIC_WORKFLOW_FIXTURE: "1"
           MCP_SCORE_SELECTION_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py tests/integration/test_public_mcp_workflow.py -v
 
       - name: Start guarded pitch fixture
         run: |
@@ -316,8 +318,9 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
+          MCP_SCORE_PUBLIC_WORKFLOW_FIXTURE: "1"
           MCP_SCORE_SELECTION_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py tests/integration/test_public_mcp_workflow.py -v
 
       - name: Start guarded pitch fixture
         run: |
