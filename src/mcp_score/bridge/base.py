@@ -11,9 +11,12 @@ application's explanation, which the tools report as a tool error.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
     from mcp_score.bridge.results import (
@@ -62,6 +65,10 @@ class ScoreBridge(ABC):
     application reported, and raises :class:`BridgeError` when it could
     not do what was asked.
     """
+
+    def operation(self) -> AbstractAsyncContextManager[None]:
+        """Own a cursor-dependent workflow; stateful bridges override this scope."""
+        return nullcontext()
 
     @property
     @abstractmethod

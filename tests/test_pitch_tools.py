@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from copy import deepcopy
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
@@ -19,6 +21,7 @@ from mcp_score.tools.manipulation import set_live_note_pitch
 from tests.fakes import (
     MUSESCORE_HANDSHAKE,
     WEBSOCKETS_CONNECT,
+    FakeBridge,
     fake_connection,
     sent_payloads,
 )
@@ -26,7 +29,6 @@ from tests.fakes import (
 if TYPE_CHECKING:
     from mcp_score.bridge import BridgeRegistry
     from mcp_score.context import ScoreContext
-    from tests.fakes import FakeBridge
 
 
 def _chord() -> PassageEvent:
@@ -218,3 +220,68 @@ async def test_mcp_rejects_coerced_coordinates_and_snapshot_numbers_before_bridg
         await server.call_tool("set_live_note_pitch", arguments, context=context)
 
     assert connected_bridge.calls == []
+
+
+@pytest.mark.anyio()
+async def test_guarded_tool_retains_operation_scope_until_verified_reply_completes(
+    registry: BridgeRegistry,
+    context: ScoreContext,
+) -> None:
+    async with asyncio.timeout(5):
+        before = _chord()
+        after = before.model_copy(deep=True)
+        after.notes[0] = PassageNote(
+            pitch=67, tpc=15, written_tpc=15, displayed_tpc=15, name="G4"
+        )
+        expected_result = PitchEdit(
+            measure=1,
+            note_index_before=0,
+            note_index_after=0,
+            before=before,
+            after=after,
+            verified=True,
+            mutation_status="applied",
+            snapshot_scope="target_chord",
+            limitations=["target contents only"],
+        )
+        receiving = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def receive() -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return json.dumps(MUSESCORE_HANDSHAKE)
+            receiving.set()
+            await release.wait()
+            return json.dumps({"result": expected_result.model_dump()})
+
+        connection = fake_connection()
+        connection.recv.side_effect = receive
+        bridge = registry.musescore
+        replacement = FakeBridge("Replacement", is_connected=False)
+        with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
+            assert await registry.activate(bridge)
+            edit = asyncio.create_task(
+                set_live_note_pitch(context, 1, 0, 0, before.offset, 0, 67, 15, before)
+            )
+            await receiving.wait()
+            switch = asyncio.create_task(registry.activate(replacement))
+            try:
+                await asyncio.sleep(0)
+                assert registry.connected() is bridge
+                assert replacement.calls == []
+                connection.close.assert_not_awaited()
+                release.set()
+                assert await edit == expected_result
+                assert await switch
+            finally:
+                release.set()
+                await asyncio.gather(edit, switch, return_exceptions=True)
+        assert registry.connected() is replacement
+        assert not bridge.is_connected
+        assert [message["command"] for message in sent_payloads(connection)] == [
+            "getCapabilities",
+            "setNotePitch",
+        ]

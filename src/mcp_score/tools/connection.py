@@ -54,14 +54,16 @@ async def _connect(
     context: ScoreContext, bridge: WebSocketBridge, host: str, port: int, hint: str
 ) -> Connected:
     """Point *bridge* at host and port and make it the active connection."""
-    bridge.host = host
-    bridge.port = port
-    if not await registry_of(context).activate(bridge):
-        raise ToolError(
-            f"Could not connect to {bridge.application_name} at {bridge.uri}. "
-            f"{bridge.connection_error or ''} {hint}"
-        )
-    return Connected(application=bridge.application_name, uri=bridge.uri)
+    registry = registry_of(context)
+    async with registry.operation(), bridge.operation():
+        bridge.host = host
+        bridge.port = port
+        if not await registry.activate(bridge):
+            raise ToolError(
+                f"Could not connect to {bridge.application_name} at {bridge.uri}. "
+                f"{bridge.connection_error or ''} {hint}"
+            )
+        return Connected(application=bridge.application_name, uri=bridge.uri)
 
 
 async def _disconnect(context: ScoreContext, bridge: ScoreBridge) -> Disconnected:

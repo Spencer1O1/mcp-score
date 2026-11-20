@@ -412,3 +412,46 @@ Things the MuseScore 4 plugin API does not document, learned by crashing MuseSco
 - **`Score.transpose` does not exist in MuseScore 4.** The plugin shifts each note's `pitch`, `tpc1` and `tpc2` itself, which is why key signatures and chord symbols in the passage are not transposed.
 - **`curScore.endCmd(true)` rolls back the current undo step.** Every command runs inside `startCmd` / `endCmd`; `processSequence` uses the rollback to restore the score when a step fails.
 - **Integration startup opens the Plugins menu.** `scripts/musescore_harness.py` enables only the bridge in the test profile. It activates the visible application window and navigates the Plugins menu on Linux and Windows, and invokes named native menu items on macOS. No custom shortcut or screen coordinates are required. The profile suppresses update checks as well as welcome dialogs, so late modal dialogs do not steal input. English menu labels are required. The bridge must answer a real ping before tests run; a running application process alone is insufficient.
+
+### Integration profile ownership
+
+The test harness activates only its recorded MuseScore process. `stop` verifies
+each PID's creation time and executable before signaling it. It does not use
+process-name kills. Logs remain available until `collect-logs` and `clean` are
+requested. See [the integration instructions](../CONTRIBUTING.md#integration-tests).
+
+Linux isolation uses child-specific XDG paths. Windows uses the official portable
+binary's executable-relative settings and app-data paths, rather than assuming
+`APPDATA` overrides Qt's known-folder APIs. The portable build is identified by
+its deployed data-path literal before launch. Current application logs and
+persisted preferences inside the declared boundary are required for startup.
+The native path decisions follow [MuseScore's portable settings implementation](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/settings.cpp),
+[its application data resolver](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/internal/globalconfiguration.cpp),
+and [Qt's Windows known-folder resolver](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qstandardpaths_win.cpp).
+
+Local/default macOS startup fails closed before native configuration writes.
+CoreFoundation home/preference-daemon environment overrides did not establish
+private native preferences in actual macOS CI. In particular, the seeded private
+nonce was absent through the native API used by [Qt's settings backend](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qsettings_mac.cpp).
+Those overrides are not presented as an isolation mechanism.
+
+The macOS integration job instead explicitly opts into the **whole disposable
+GitHub-hosted runner account** boundary. Hosted Actions metadata and matching
+runner account/home/temp paths are required; local and self-hosted runs are
+refused. This is accidental-use protection, not a security sandbox. Native
+MuseScore account preferences and data intentionally change in this mode.
+Artifact/process records and plugin payloads remain under a separate marked
+root. Only the exact native `session` directory is atomically moved into unique
+owned backups before fixture launches; symlinked paths and failed renames fail
+closed. Cleanup removes owned artifacts/backups without recursively deleting the
+native data tree or home. Remaining account mutations are left for hosted-runner
+disposal. An explicit boundary report records native changes, session moves,
+owned-artifact removal and process cleanup; no ordinary-profile preservation
+claim is made for this mode. The same real macOS bridge and fixture tests run.
+
+Qt Quick pipeline caches use the documented `QSG_RHI_PIPELINE_CACHE_LOAD` and
+`QSG_RHI_PIPELINE_CACHE_SAVE` file overrides inside the marked artifact root; this
+avoids Windows known-folder cache writes without disabling snapshot assertions.
+See [Qt's graphics configuration implementation](https://github.com/qt/qtdeclarative/blob/v6.9.3/src/quick/items/qquickgraphicsconfiguration.cpp).
+Linux and Windows CI additionally check that the ordinary profile remains
+unchanged across startup, fixture changes, and cleanup.
