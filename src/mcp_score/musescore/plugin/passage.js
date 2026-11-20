@@ -12,7 +12,6 @@ var unsupportedNotation = [
     "written pitch and octave for transposing instruments (concert pitch is returned)",
     "grace-note contents",
     "tie and spanner endpoints",
-    "chord articulations when the native list is unavailable (null, before MuseScore 4.6)",
     "note-attached symbols, fingerings and other non-articulation child elements",
     "lyric melisma endpoints, displayed verse labels and rich-text interpretation",
     "tuplet grouping (notated and elapsed durations are returned)",
@@ -183,6 +182,8 @@ function readPassage(plugin, params) {
     }
     var measures = [];
     var eventCount = 0;
+    var unavailableLyrics = false;
+    var unavailableArticulations = false;
     for (; measureNumber <= end; measureNumber++) {
         if (!measure) return { error: "Measure out of range: " + measureNumber };
         if (!measure.firstSegment) {
@@ -220,6 +221,15 @@ function readPassage(plugin, params) {
             segment = segment.nextInMeasure;
         }
         eventCount += events.length;
+        for (var eventIndex = 0; eventIndex < events.length; eventIndex++) {
+            var currentEvent = events[eventIndex];
+            if (currentEvent.kind !== "other" && currentEvent.lyrics === null) {
+                unavailableLyrics = true;
+            }
+            if (currentEvent.kind === "chord" && currentEvent.articulations === null) {
+                unavailableArticulations = true;
+            }
+        }
         measures.push({
             measure: measureNumber,
             tick: measureTick,
@@ -232,6 +242,11 @@ function readPassage(plugin, params) {
         });
         measure = measure.nextMeasure;
     }
+    var unsupported = unsupportedNotation.slice();
+    if (unavailableLyrics) unsupported.push("attached lyrics (native wrapper unavailable)");
+    if (unavailableArticulations) {
+        unsupported.push("chord articulations (native wrapper unavailable before MuseScore 4.6)");
+    }
     return {
         result: {
             source: "live",
@@ -241,7 +256,7 @@ function readPassage(plugin, params) {
             voices: voices,
             measures: measures,
             rangeComplete: true,
-            unsupported: unsupportedNotation.slice()
+            unsupported: unsupported
         }
     };
 }

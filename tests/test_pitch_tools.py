@@ -285,3 +285,72 @@ async def test_guarded_tool_retains_operation_scope_until_verified_reply_complet
             "getCapabilities",
             "setNotePitch",
         ]
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_mcp_accepts_typed_attachment_metadata_in_complete_fresh_snapshot(
+    registry: BridgeRegistry,
+    context: ScoreContext,
+    invalid: bool,
+) -> None:
+    from mcp_score.bridge.passage import PassageArticulation, PassageLyric
+
+    before = _chord()
+    before.lyrics = [
+        PassageLyric(
+            text="Hel",
+            verse=0,
+            syllabic=1,
+            syllabic_name="BEGIN",
+            placement=1,
+            placement_name="BELOW",
+        )
+    ]
+    before.articulations = [
+        PassageArticulation(
+            symbol=123,
+            name="Staccato",
+            placement=0,
+            placement_name="ABOVE",
+            anchor=0,
+            direction=0,
+        )
+    ]
+    snapshot = before.model_dump()
+    if invalid:
+        snapshot["lyrics"][0]["verse"] = True
+    result = PitchEdit(
+        measure=1,
+        note_index_before=0,
+        note_index_after=0,
+        before=before,
+        after=before,
+        verified=True,
+        mutation_status="unchanged",
+        snapshot_scope="target_chord",
+        limitations=["attachment metadata informational"],
+    )
+    connection = fake_connection(MUSESCORE_HANDSHAKE, {"result": result.model_dump()})
+    with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
+        assert await registry.activate(registry.musescore)
+    arguments = {
+        "measure": 1,
+        "staff": 0,
+        "voice": 0,
+        "offset": {"numerator": 1, "denominator": 4},
+        "note_index": 0,
+        "pitch": 60,
+        "tpc": 14,
+        "expected": snapshot,
+    }
+    server = create_server(registry)
+    if invalid:
+        with pytest.raises(ToolError):
+            await server.call_tool("set_live_note_pitch", arguments, context=context)
+        assert len(sent_payloads(connection)) == 1  # Only the connection handshake.
+    else:
+        await server.call_tool("set_live_note_pitch", arguments, context=context)
+        params = sent_payloads(connection)[-1]["params"]
+        assert params["expected"]["lyrics"][0]["syllabicName"] == "BEGIN"
+        assert params["expected"]["articulations"][0]["symbol"] == 123

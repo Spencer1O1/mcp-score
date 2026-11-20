@@ -175,6 +175,10 @@ between them. This guards only target contents: it provides no persistent event
 ID, application-wide score identity, or revision token, and cannot detect a
 switch to another score with identical target contents.
 
+Complete events containing `lyrics` and `articulations` can be supplied without
+stripping those fields. They are typed informational metadata: the pitch guard
+does not compare attachment changes or expand its precondition to protect them.
+
 The edit writes the selected native note's sounding pitch and concert/written
 TPC properties. It preserves the exact previous written-minus-concert TPC
 interval; a replacement written spelling outside the native range is rejected.

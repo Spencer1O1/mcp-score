@@ -268,3 +268,27 @@ def test_articulations_use_native_list_and_keep_codes_and_localized_names() -> N
     assert chord.articulations == []
     assert next(event for event in events if event.tick == 960).articulations is None
     assert next(event for event in events if event.staff == 1).articulations is None
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_attachment_unsupported_metadata_tracks_actual_native_list_availability(
+    available: bool,
+) -> None:
+    setup = (
+        "segments.forEach(segment=>[0,1,4].forEach(track=>{"
+        "const element=segment.elementAt(track);if(!element)return;"
+        "element.lyrics=[];if(element.type===chordType)element.articulations=[];"
+        "}));"
+        if available
+        else ""
+    )
+    reply = _execute(
+        setup + "console.log(JSON.stringify(readPassage(plugin,"
+        "{startMeasure:1,endMeasure:1})));"
+    )
+    passage = Passage.model_validate(_snake_case_keys(reply["result"]))
+    assert any("attached lyrics" in item for item in passage.unsupported) != available
+    assert (
+        any("chord articulations" in item for item in passage.unsupported) != available
+    )
+    assert passage.range_complete

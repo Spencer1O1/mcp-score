@@ -183,7 +183,10 @@ async def test_native_lyrics_preserve_verses_syllables_placement_and_staff_voice
     assert bass.lyrics is not None and bass.lyrics[0].text == "bass"
     no_lyrics = next(event for event in passage.measures[0].events if event.staff == 2)
     assert no_lyrics.lyrics == []
-    assert any("articulations" in detail for detail in passage.unsupported)
+    unavailable_articulations = any(event.articulations is None for event in melody)
+    assert any("chord articulations" in detail for detail in passage.unsupported) == (
+        unavailable_articulations
+    )
     assert passage.range_complete
     assert before == after
 
@@ -237,3 +240,33 @@ async def test_native_articulation_list_tracks_wrapper_availability() -> None:
         assert first[0].symbol is not None
         assert first[0].name is not None and "staccato" in first[0].name.lower()
         assert all(event.articulations == [] for event in chords[1:])
+
+
+@pytest.mark.anyio()
+async def test_fresh_attachment_snapshot_is_accepted_by_guarded_pitch_noop() -> None:
+    from mcp_score.bridge.pitch import ExpectedChord
+
+    bridge = MuseScoreBridge()
+    try:
+        before = await bridge.read_passage(1, 1, 0, 0)
+        event = next(
+            event for event in before.measures[0].events if event.kind == "chord"
+        )
+        assert event.lyrics is not None and event.lyrics
+        expected = ExpectedChord.model_validate(event.model_dump())
+        result = await bridge.set_note_pitch(
+            1,
+            0,
+            0,
+            event.offset,
+            0,
+            event.notes[0].pitch,
+            event.notes[0].tpc,
+            expected,
+        )
+        after = await bridge.read_passage(1, 1, 0, 0)
+    finally:
+        await bridge.disconnect()
+    assert result.mutation_status == "unchanged"
+    assert result.before == event and result.after == event
+    assert after == before

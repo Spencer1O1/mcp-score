@@ -305,6 +305,8 @@ and spellings in the same synchronous handler as the edit. A mismatch rejects
 the edit without opening an undo step. Successful edits return actual native
 before/after events and create one undo step; no-op requests create none.
 Chord-tone indices belong only to that snapshot, not to later reads.
+Lyrics and articulations in the snapshot are accepted as informational
+metadata; the pitch guard does not compare them or protect their changes.
 
 This guards only the target chord, not a score identity or global revision;
 switching to another score with identical target contents is not detected.
@@ -678,18 +680,20 @@ A rhythmic event onset and optional chord-tone index in one read.
 
 A complete, strictly typed target snapshot from a fresh live read.
 
-| Field             | Type                      | Description |
-| ----------------- | ------------------------- | ----------- |
-| `kind`            | `str`                     |             |
-| `type`            | `int`                     |             |
-| `staff`           | `int`                     |             |
-| `voice`           | `int`                     |             |
-| `tick`            | `int`                     |             |
-| `offset`          | `WholeNoteFraction`       |             |
-| `duration`        | `WholeNoteFraction`       |             |
-| `actual_duration` | `WholeNoteFraction`       |             |
-| `notes`           | `list[ExpectedPitchNote]` |             |
-| `text`            | `str \| None`             |             |
+| Field             | Type                                | Description                                                                    |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| `kind`            | `str`                               |                                                                                |
+| `type`            | `int`                               |                                                                                |
+| `staff`           | `int`                               |                                                                                |
+| `voice`           | `int`                               |                                                                                |
+| `tick`            | `int`                               |                                                                                |
+| `offset`          | `WholeNoteFraction`                 |                                                                                |
+| `duration`        | `WholeNoteFraction`                 |                                                                                |
+| `actual_duration` | `WholeNoteFraction`                 |                                                                                |
+| `notes`           | `list[ExpectedPitchNote]`           |                                                                                |
+| `text`            | `str \| None`                       |                                                                                |
+| `lyrics`          | `list[PassageLyric] \| None`        | Informational snapshot metadata, accepted but not compared by the pitch guard. |
+| `articulations`   | `list[PassageArticulation] \| None` | Informational snapshot metadata, accepted but not compared by the pitch guard. |
 
 ### `ExpectedPitchNote`
 
@@ -746,26 +750,20 @@ A native chord articulation; null fields are unavailable.
 
 An element at an exact position in the live score.
 
-| Field             | Type                           | Description                                                                   |
-| ----------------- | ------------------------------ | ----------------------------------------------------------------------------- |
-| `kind`            | `"chord" \| "rest" \| "other"` |                                                                               |
-| `type`            | `int`                          | MuseScore's element type code.                                                |
-| `staff`           | `int`                          | Staff index, starting at zero.                                                |
-| `voice`           | `int`                          | Voice index, starting at zero.                                                |
-| `tick`            | `int`                          |                                                                               |
-| `offset`          | `Duration`                     | Exact offset from the measure start, as a fraction of a whole note.           |
-| `duration`        | `Duration \| None`             | Notated length, including dots; null for non-rhythmic elements.               |
-| `actual_duration` | `Duration \| None`             | Elapsed score time, including tuplet scaling; null when unavailable.          |
-| `notes`           | `list[PassageNote]`            |                                                                               |
-| `text`            | `str \| None`                  | Text of an annotation, where exposed by MuseScore.                            |
-| `lyrics`          | `list[PassageLyric] \| None`   | Native chord/rest lyrics; [] means none, null means unavailable/inapplicable. |
-
-Defaults to null for payloads from older plugins. Native ordering is retained;
-neither this order nor the verse index is a persistent lyric identifier. |
-| `articulations` | `list[PassageArticulation] \| None` | Chord articulations; [] means none, null means unavailable/inapplicable.
-
-The native list is exposed starting with MuseScore 4.6. Older payloads and
-native wrappers remain null, rather than claiming there are no articulations. |
+| Field             | Type                                | Description                                                                   |
+| ----------------- | ----------------------------------- | ----------------------------------------------------------------------------- |
+| `kind`            | `"chord" \| "rest" \| "other"`      |                                                                               |
+| `type`            | `int`                               | MuseScore's element type code.                                                |
+| `staff`           | `int`                               | Staff index, starting at zero.                                                |
+| `voice`           | `int`                               | Voice index, starting at zero.                                                |
+| `tick`            | `int`                               |                                                                               |
+| `offset`          | `Duration`                          | Exact offset from the measure start, as a fraction of a whole note.           |
+| `duration`        | `Duration \| None`                  | Notated length, including dots; null for non-rhythmic elements.               |
+| `actual_duration` | `Duration \| None`                  | Elapsed score time, including tuplet scaling; null when unavailable.          |
+| `notes`           | `list[PassageNote]`                 |                                                                               |
+| `text`            | `str \| None`                       | Text of an annotation, where exposed by MuseScore.                            |
+| `lyrics`          | `list[PassageLyric] \| None`        | Native chord/rest lyrics; [] means none, null means unavailable/inapplicable. |
+| `articulations`   | `list[PassageArticulation] \| None` | Chord articulations; [] means none, null means unavailable/inapplicable.      |
 
 ### `PassageLyric`
 

@@ -306,3 +306,22 @@ def test_conventional_accidentals_remain_eligible(accidental: str) -> None:
     )
     assert response["reply"]["result"]["mutationStatus"] == "applied"
     assert response["starts"] == 1
+
+
+def test_attachment_metadata_is_returned_but_does_not_expand_pitch_guard_scope() -> (
+    None
+):
+    response = _run(
+        "chord.lyrics=[{text:'current',verse:0,syllabic:0,placement:1}];"
+        "chord.articulations=[{symbol:123,subtypeName:()=> 'Staccato'}];"
+        "params.expected.lyrics=[{text:'older snapshot'}];"
+        "params.expected.articulations=[];"
+    )
+    result = PitchEdit.model_validate(_snake_case_keys(response["reply"]["result"]))
+    assert result.mutation_status == "applied"
+    assert result.before.lyrics is not None
+    assert result.before.lyrics[0].text == "current"
+    assert result.after.lyrics == result.before.lyrics
+    assert result.before.articulations is not None
+    assert result.before.articulations[0].symbol == 123
+    assert result.after.articulations == result.before.articulations

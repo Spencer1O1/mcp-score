@@ -6,7 +6,11 @@ from typing import Literal
 
 from pydantic import Field, StrictInt, StrictStr
 
-from mcp_score.bridge.passage import PassageEvent  # noqa: TC001
+from mcp_score.bridge.passage import (  # noqa: TC001
+    PassageArticulation,
+    PassageEvent,
+    PassageLyric,
+)
 
 # Pydantic resolves the nested result annotation at runtime.
 from mcp_score.bridge.results import Duration, Result
@@ -50,6 +54,10 @@ class ExpectedChord(Result):
     actual_duration: WholeNoteFraction
     notes: list[ExpectedPitchNote] = Field(min_length=1)
     text: StrictStr | None = None
+    lyrics: list[PassageLyric] | None = None
+    """Informational snapshot metadata, accepted but not compared by the pitch guard."""
+    articulations: list[PassageArticulation] | None = None
+    """Informational snapshot metadata, accepted but not compared by the pitch guard."""
 
 
 class PitchEditRequest(Result):
