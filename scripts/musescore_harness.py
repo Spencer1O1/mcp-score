@@ -1124,6 +1124,8 @@ def start_xvfb(settings: Settings) -> None:
 
 def launch(settings: Settings, score: Path) -> subprocess.Popen[bytes]:
     """Launch in the declared boundary and record ownership before waiting."""
+    if os.environ.get("MUSESCORE_LYRIC_TEST_SETUP") == "1":
+        _install_lyric_fixture(settings.layout)
     for attempt in range(1, LAUNCH_ATTEMPTS + 1):
         process = _start(settings, score)
         expected_executable = (
@@ -1468,8 +1470,6 @@ def start(settings: Settings, score: Path) -> None:
             _install_chord_tone_fixture(settings.layout)
         if os.environ.get("MUSESCORE_NOTE_REST_TEST_SETUP") == "1":
             _install_note_rest_fixture(settings.layout)
-        if os.environ.get("MUSESCORE_LYRIC_TEST_SETUP") == "1":
-            _install_lyric_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -99,3 +100,39 @@ def test_unowned_or_linked_copy_refused(tmp_path: Path, destination: str) -> Non
     with pytest.raises(harness.HarnessError, match="linked"):
         harness._install_lyric_fixture(layout)
     assert outside.read_text() == "untouched"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_launch_installs_lyric_fault_once_before_first_of_two_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    monkeypatch.delenv("MUSESCORE_LYRIC_TEST_SETUP", raising=False)
+    if enabled:
+        monkeypatch.setenv("MUSESCORE_LYRIC_TEST_SETUP", "1")
+    layout = harness.layout_for("Linux", tmp_path / "owned")
+    settings = harness.Settings("Linux", "4.7.5", tmp_path, layout)
+    dead, alive = MagicMock(), MagicMock()
+    dead.poll.return_value = -6
+    alive.poll.return_value = None
+    attempts = iter([dead, alive])
+    events: list[str] = []
+
+    def install(actual_layout: object) -> None:
+        assert actual_layout is layout
+        events.append("install")
+
+    def start(*arguments: object) -> MagicMock:
+        events.append("start")
+        return next(attempts)
+
+    with (
+        patch.object(harness, "_install_lyric_fixture", side_effect=install),
+        patch.object(harness, "_start", side_effect=start),
+        patch.object(harness, "track_process"),
+        patch.object(harness, "refresh_owned"),
+        patch.object(harness, "STARTUP_SECONDS", 0),
+    ):
+        process = harness.launch(settings, tmp_path / "score.musicxml")
+
+    assert process is alive
+    assert events == (["install", "start", "start"] if enabled else ["start", "start"])
