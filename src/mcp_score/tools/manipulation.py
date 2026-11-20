@@ -107,6 +107,8 @@ async def set_live_note_pitch(
     the edit without opening an undo step. Successful edits return actual native
     before/after events and create one undo step; no-op requests create none.
     Chord-tone indices belong only to that snapshot, not to later reads.
+    Lyrics and articulations in the snapshot are accepted as informational
+    metadata; the pitch guard does not compare them or protect their changes.
 
     This guards only the target chord, not a score identity or global revision;
     switching to another score with identical target contents is not detected.
