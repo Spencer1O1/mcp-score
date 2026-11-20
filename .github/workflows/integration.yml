@@ -80,7 +80,7 @@ jobs:
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
 
       - name: Bridge tests (live plugin)
-        run: uv run pytest tests/integration/test_musescore_bridge.py -v
+        run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
         run: |
@@ -175,7 +175,7 @@ jobs:
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
 
       - name: Bridge tests (live plugin)
-        run: uv run pytest tests/integration/test_musescore_bridge.py -v
+        run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
         run: |
@@ -272,7 +272,7 @@ jobs:
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
 
       - name: Bridge tests (live plugin)
-        run: uv run pytest tests/integration/test_musescore_bridge.py -v
+        run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
         run: |

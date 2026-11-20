@@ -92,19 +92,25 @@ MuseScore {
             return { error: "Invalid JSON: " + e.message };
         }
 
-        var command = request.command;
-        var params = request.params || {};
-
-        if (!command) {
-            return { error: "Missing 'command' field" };
+        if (!request || typeof request !== "object" || Array.isArray(request)) {
+            return { error: "Invalid request: expected a command object" };
         }
+        var command = request.command;
+        if (typeof command !== "string" || command.length === 0) {
+            return { error: "Missing or invalid 'command' field: expected a nonempty string" };
+        }
+        if (request.params !== undefined && (!request.params
+                || typeof request.params !== "object" || Array.isArray(request.params))) {
+            return { error: "Invalid 'params' field: expected an object" };
+        }
+        var params = request.params === undefined ? {} : request.params;
 
         console.log(logPrefix, "Command:", command);
 
-        var implementation = commands[command];
-        if (!implementation) {
+        if (!Object.prototype.hasOwnProperty.call(commands, command)) {
             return { error: "Unknown command: " + command };
         }
+        var implementation = commands[command];
         try {
             return implementation(root, params);
         } catch (e) {
