@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import websockets
 from websockets.exceptions import WebSocketException
@@ -115,10 +115,12 @@ class WebSocketTransport:
         if not isinstance(reply, str):
             raise TransportError("received a binary message, expected JSON text")
         try:
-            decoded: CommandResult = json.loads(reply)
+            decoded: object = json.loads(reply)
         except json.JSONDecodeError as exception:
             raise TransportError(f"received invalid JSON: {exception}") from None
-        return decoded
+        if not isinstance(decoded, dict):
+            raise TransportError("received JSON that is not an object")
+        return cast("CommandResult", decoded)
 
     def _require_open(self) -> ClientConnection:
         connection = self._connection
@@ -147,6 +149,8 @@ class WebSocketBridge(ScoreBridge):
         self.port = port
         self.receive_timeout = receive_timeout
         self._transport: WebSocketTransport | None = None
+        self.connection_error: str | None = None
+        """Why the last connection attempt failed, or None after success."""
 
     @property
     def application_name(self) -> str:
@@ -161,12 +165,16 @@ class WebSocketBridge(ScoreBridge):
         return self._transport is not None and self._transport.is_open
 
     async def connect(self) -> bool:
+        if self._transport is not None:
+            await self.disconnect()
+        self.connection_error = None
         transport = WebSocketTransport(self.uri, self.receive_timeout)
         try:
             await transport.open()
             self._transport = transport
             await self._on_connected(transport)
         except TransportError as exception:
+            self.connection_error = str(exception)
             logger.error("%s: %s", self.application_name, exception)
             await transport.close()
             self._transport = None
@@ -194,6 +202,9 @@ class WebSocketBridge(ScoreBridge):
     async def _on_disconnecting(self, transport: WebSocketTransport) -> None:
         """Hook run right before the connection closes."""
 
+    def _validate_payload(self, payload: dict[str, Any]) -> None:
+        """Reject unsupported requests before sending, including after reconnect."""
+
     async def _exchange(self, payload: dict[str, Any]) -> CommandResult:
         """Send *payload* and return the reply, connecting first if needed.
 
@@ -206,10 +217,12 @@ class WebSocketBridge(ScoreBridge):
         """
         if not self.is_connected and not await self.connect():
             raise BridgeError(
-                f"Cannot connect to {self.application_name} at {self.uri}"
+                f"Cannot connect to {self.application_name} at {self.uri}. "
+                f"{self.connection_error}"
             )
         transport = self._transport
         assert transport is not None  # noqa: S101 - established by the line above
+        self._validate_payload(payload)
         try:
             return await transport.request(payload)
         except TransportError as exception:
@@ -219,10 +232,12 @@ class WebSocketBridge(ScoreBridge):
         await self.disconnect()
         if not await self.connect():
             raise BridgeError(
-                f"Lost connection to {self.application_name} and could not reconnect"
+                f"Lost connection to {self.application_name} and could not reconnect. "
+                f"{self.connection_error}"
             )
         transport = self._transport
         assert transport is not None  # noqa: S101 - established by connect()
+        self._validate_payload(payload)
         try:
             return await transport.request(payload)
         except TransportError as exception:

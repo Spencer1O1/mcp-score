@@ -55,6 +55,10 @@ class _HookRecordingBridge(MuseScoreBridge):
     async def _on_disconnecting(self, transport: WebSocketTransport) -> None:
         self.disconnecting_with.append(transport)
 
+    def _validate_payload(self, payload: dict[str, Any]) -> None:
+        # These tests exercise transport hooks without MuseScore negotiation.
+        pass
+
 
 @pytest.fixture
 async def open_transport() -> AsyncIterator[tuple[WebSocketTransport, AsyncMock]]:
@@ -122,6 +126,17 @@ class TestWebSocketTransport:
 
         # Act / Assert
         with pytest.raises(TransportError, match="invalid JSON"):
+            await transport.request(PAYLOAD)
+
+    @pytest.mark.anyio()
+    @pytest.mark.parametrize("reply", ["null", "[]", '"pong"', "1"])
+    async def test_request_with_non_object_json_raises_transport_error(
+        self, reply: str
+    ) -> None:
+        transport = WebSocketTransport(URI, RECEIVE_TIMEOUT)
+        with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=fake_connection(reply))):
+            await transport.open()
+        with pytest.raises(TransportError, match="not an object"):
             await transport.request(PAYLOAD)
 
     @pytest.mark.anyio()

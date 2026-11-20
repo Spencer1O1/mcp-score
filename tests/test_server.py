@@ -32,6 +32,7 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         "connect_to_dorico",
         "disconnect_from_dorico",
         "get_live_score_info",
+        "get_musescore_bridge_info",
         "ping_score_app",
         # analysis
         "read_passage",
