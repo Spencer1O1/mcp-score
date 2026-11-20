@@ -10,15 +10,12 @@
 
 ## Installation
 
-```bash
-pip install mcp-score-server
-```
-
-Or with uv:
-
-```bash
-uv tool install mcp-score-server
-```
+Install this fork using the [fork installation guide](fork-installation.md).
+The package name is shared with upstream, so a plain PyPI package-name install
+does not select these fork changes. After `uv sync --locked --no-dev`, run the
+commands below from the checkout with `uv run --no-sync mcp-score` in place of
+`mcp-score`. Configure the client with that environment's absolute executable
+path. The guide includes Windows and separate-host examples.
 
 ### Install the score generation skill
 
@@ -41,7 +38,7 @@ This copies the WebSocket bridge plugin to `~/Documents/MuseScore4/Plugins/`. Re
 ### Claude Code
 
 ```bash
-claude mcp add mcp-score -- mcp-score serve
+claude mcp add mcp-score -- /absolute/path/to/mcp-score/.venv/bin/mcp-score serve
 ```
 
 ### Claude Desktop
@@ -52,7 +49,7 @@ Add to `claude_desktop_config.json`:
 {
   "mcpServers": {
     "mcp-score": {
-      "command": "mcp-score",
+      "command": "/absolute/path/to/mcp-score/.venv/bin/mcp-score",
       "args": ["serve"]
     }
   }
