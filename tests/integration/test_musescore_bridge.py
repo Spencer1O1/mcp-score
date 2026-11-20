@@ -26,6 +26,8 @@ from mcp_score.bridge.results import BarlineSet, Duration, Note
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from mcp_score.bridge.passage import Passage
+
 pytestmark = pytest.mark.integration
 
 # What the committed fixture score contains: four quarter notes C4 D4 E4 F4.
@@ -103,6 +105,61 @@ class TestMuseScoreBridgeReadsFixture:
             # Act / Assert
             with pytest.raises(BridgeError, match="out of range"):
                 await bridge.go_to_measure(count + 1)
+
+    @pytest.mark.anyio()
+    async def test_passage_returns_every_quarter_note_without_moving_cursor(
+        self,
+    ) -> None:
+        async with _connected_bridge() as bridge:
+            before = await bridge.get_cursor_info()
+
+            passage = await bridge.read_passage(1, 1)
+            after = await bridge.get_cursor_info()
+
+        chords = [
+            event for event in passage.measures[0].events if event.kind == "chord"
+        ]
+        assert [event.notes[0].name for event in chords] == ["C4", "D4", "E4", "F4"]
+        assert [event.tick for event in chords] == [0, 480, 960, 1440]
+        assert [event.offset for event in chords] == [
+            Duration(numerator=0, denominator=1),
+            Duration(numerator=1, denominator=4),
+            Duration(numerator=1, denominator=2),
+            Duration(numerator=3, denominator=4),
+        ]
+        assert all(event.duration == _QUARTER_NOTE for event in chords)
+        assert all(event.actual_duration == _QUARTER_NOTE for event in chords)
+        assert passage.range_complete is True
+        assert passage.unsupported
+        assert passage.measures[0].time_signature is not None
+        assert passage.measures[0].time_signature.numerator == 4
+        assert passage.measures[0].time_signature.denominator == 4
+        assert after == before
+
+    @pytest.mark.anyio()
+    async def test_passage_observes_unsaved_edit_and_does_not_insert_undo_step(
+        self,
+    ) -> None:
+        async with _connected_bridge() as bridge:
+            before = await bridge.read_passage(1, 1, staff=0, voice=0)
+            await bridge.select_range(1, 1, 0, 0)
+            await bridge.transpose(1)
+            try:
+                changed = await bridge.read_passage(1, 1, staff=0, voice=0)
+            finally:
+                await bridge.undo()
+            restored = await bridge.read_passage(1, 1, staff=0, voice=0)
+
+        def pitches(passage: Passage) -> list[int]:
+            return [
+                note.pitch
+                for measure in passage.measures
+                for event in measure.events
+                for note in event.notes
+            ]
+
+        assert pitches(changed) == [pitch + 1 for pitch in pitches(before)]
+        assert restored == before
 
 
 class TestMuseScoreBridgeModifiesScore:

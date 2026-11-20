@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
 
 from mcp_score.bridge.base import BridgeError
+from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -53,6 +54,7 @@ class MuseScoreCommand(StrEnum):
     PING = "ping"
     GET_SCORE = "getScore"
     GET_CURSOR_INFO = "getCursorInfo"
+    READ_PASSAGE = "readPassage"
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
@@ -124,6 +126,24 @@ class MuseScoreBridge(WebSocketBridge):
 
     async def get_cursor_info(self) -> CursorInfo:
         return await self._run(CursorInfo, MuseScoreCommand.GET_CURSOR_INFO)
+
+    async def read_passage(
+        self,
+        start_measure: int,
+        end_measure: int,
+        staff: int | None = None,
+        voice: int | None = None,
+    ) -> Passage:
+        return await self._run(
+            Passage,
+            MuseScoreCommand.READ_PASSAGE,
+            {
+                "startMeasure": start_measure,
+                "endMeasure": end_measure,
+                "staff": staff,
+                "voice": voice,
+            },
+        )
 
     async def get_properties(self) -> SelectionProperties:
         """The cursor position is the closest MuseScore has to selection properties."""

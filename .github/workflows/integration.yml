@@ -78,6 +78,16 @@ jobs:
       - name: Bridge tests (live plugin)
         run: uv run pytest tests/integration/test_musescore_bridge.py -v
 
+      - name: Start multi-staff passage fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
+
+      - name: Multi-staff passage tests (live plugin)
+        env:
+          MCP_SCORE_PASSAGE_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py -v
+
       - name: Stop MuseScore and collect logs
         if: always()
         run: |
@@ -131,6 +141,16 @@ jobs:
       - name: Bridge tests (live plugin)
         run: uv run pytest tests/integration/test_musescore_bridge.py -v
 
+      - name: Start multi-staff passage fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
+
+      - name: Multi-staff passage tests (live plugin)
+        env:
+          MCP_SCORE_PASSAGE_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py -v
+
       - name: Stop MuseScore and collect logs
         if: always()
         shell: bash
@@ -183,6 +203,16 @@ jobs:
 
       - name: Bridge tests (live plugin)
         run: uv run pytest tests/integration/test_musescore_bridge.py -v
+
+      - name: Start multi-staff passage fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
+
+      - name: Multi-staff passage tests (live plugin)
+        env:
+          MCP_SCORE_PASSAGE_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py -v
 
       - name: Stop MuseScore and collect logs
         if: always()

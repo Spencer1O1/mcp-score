@@ -1,24 +1,14 @@
-"""Analysis tools: read from the connected application.
-
-MuseScore reports what sits under its cursor; the tools move the cursor
-measure by measure, so a passage comes back as one entry per measure with
-the element at the start of that measure. Dorico's Remote Control API has
-no cursor: the only thing it can read is the selection's properties.
-"""
+"""Read live musical contents independently of the application's cursor."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mcp_score.bridge.results import (
-    CursorInfo,
-    CursorPosition,
-    Result,
-    SelectionProperties,
-)
+from mcp_score.bridge.passage import Passage
+from mcp_score.bridge.results import SelectionProperties
 from mcp_score.context import ScoreContext
 from mcp_score.tools import (
-    navigate,
+    ToolError,
     require_bridge,
     require_measure,
     require_measure_range,
@@ -31,89 +21,66 @@ if TYPE_CHECKING:
 __all__ = ["register"]
 
 
-class MeasureContent(Result):
-    measure: int
-    content: CursorInfo
-    """The cursor at the start of the measure and the element there."""
-
-
-class Passage(Result):
-    start_measure: int
-    end_measure: int
-    staff: int | None
-    elements: list[MeasureContent]
-    warning: str | None = None
-    """Why the application could not read more, when it could not."""
-
-
-class Selected(CursorPosition):
-    """A measure of a staff is selected in the application."""
-
-    warning: str | None = None
-
-
 @score_tool
 async def read_passage(
     context: ScoreContext,
     start_measure: int,
     end_measure: int,
     staff: int | None = None,
+    voice: int | None = None,
 ) -> Passage:
-    """Read a range of measures in the live score, one entry per measure.
+    """Read every rhythmic event in an inclusive range of live MuseScore measures.
 
-    For each measure MuseScore reports the cursor position (measure, staff,
-    voice, beat, tick) and the element at the start of the measure on that
-    staff: its type, and for a note or chord its pitches and duration. It
-    does not list every element in the measure. Not available with Dorico,
-    which cannot read score content.
+    Returns chords, rests, concert pitch names, exact offsets and durations
+    across all requested staves and voices, including unsaved changes. Does
+    not move the selection or the bridge's logical cursor. Other segment
+    elements and annotations include their type and text where available.
+    The result lists notation details not yet serialized in `unsupported`;
+    `range_complete` describes traversal, not full notation fidelity.
+    Oversize reads fail without returning a truncated passage; request a
+    smaller range. Not available with Dorico or an older MuseScore plugin.
 
     Args:
-        start_measure: First measure to read (1-indexed).
-        end_measure: Last measure to read (inclusive, 1-indexed).
-        staff: Staff to read (0-indexed). Omit to read the current staff.
+        start_measure: First ordinal measure (1-indexed, repeats not expanded).
+        end_measure: Last ordinal measure (inclusive, 1-indexed).
+        staff: Staff index (0-indexed). Omit to read all staves.
+        voice: Voice index (0-3). Omit to read all voices.
     """
     bridge = require_bridge(context)
     require_measure_range(start_measure, end_measure)
-
-    elements: list[MeasureContent] = []
-    for measure in range(start_measure, end_measure + 1):
-        await navigate(bridge, measure, staff)
-        content = await bridge.get_cursor_info()
-        elements.append(MeasureContent(measure=measure, content=content))
-
-    return Passage(
-        start_measure=start_measure,
-        end_measure=end_measure,
-        staff=staff,
-        elements=elements,
-        warning=bridge.content_reading_limitation,
-    )
+    _require_track(staff, voice)
+    return await bridge.read_passage(start_measure, end_measure, staff, voice)
 
 
 @score_tool
 async def get_measure_content(
-    context: ScoreContext, measure: int, staff: int = 0
-) -> Selected:
-    """Select one measure of one staff in MuseScore and report the selection.
+    context: ScoreContext,
+    measure: int,
+    staff: int | None = None,
+    voice: int | None = None,
+) -> Passage:
+    """Read the complete rhythmic contents of a live MuseScore measure.
 
-    The selection becomes visible in the score, ready for a manual edit;
-    the result names the selected measure and staff, not its content (use
-    read_passage for that). Not available with Dorico, which cannot move to
-    a staff or select a measure.
+    Uses the same event schema and notation limitations as read_passage.
+    Includes unsaved changes without selecting the measure or moving the
+    bridge cursor. Not available with Dorico or an older MuseScore plugin.
 
     Args:
-        measure: Measure number (1-indexed).
-        staff: Staff index (0-indexed, default: 0).
+        measure: Ordinal measure number (1-indexed, repeats not expanded).
+        staff: Staff index (0-indexed). Omit to read all staves.
+        voice: Voice index (0-3). Omit to read all voices.
     """
     bridge = require_bridge(context)
     require_measure(measure)
-    await navigate(bridge, measure, staff)
-    selected = await bridge.select_measure()
-    return Selected(
-        measure=selected.measure,
-        staff=selected.staff,
-        warning=bridge.content_reading_limitation,
-    )
+    _require_track(staff, voice)
+    return await bridge.read_passage(measure, measure, staff, voice)
+
+
+def _require_track(staff: int | None, voice: int | None) -> None:
+    if staff is not None and staff < 0:
+        raise ToolError("staff must be >= 0.")
+    if voice is not None and not 0 <= voice <= 3:
+        raise ToolError("voice must be between 0 and 3.")
 
 
 @score_tool

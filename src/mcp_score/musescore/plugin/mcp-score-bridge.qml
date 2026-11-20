@@ -20,6 +20,7 @@ import QtQuick 2.15
 import MuseScore 3.0
 
 import "reading.js" as Reading
+import "passage.js" as Passage
 import "editing.js" as Editing
 import "selection.js" as Selection
 import "sequence.js" as Sequence
@@ -56,6 +57,7 @@ MuseScore {
         "ping":                 Reading.ping,
         "getScore":             Reading.getScore,
         "getCursorInfo":        Reading.getCursorInfo,
+        "readPassage":          Passage.readPassage,
         "goToMeasure":          Reading.goToMeasure,
         "goToStaff":            Reading.goToStaff,
         "addNote":              Editing.addNote,

@@ -19,6 +19,7 @@ import pytest
 from pydantic import BaseModel
 
 from mcp_score.bridge import BridgeError
+from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     ApplicationReply,
     BarlineSet,
@@ -41,7 +42,6 @@ from mcp_score.bridge.results import (
 )
 from mcp_score.tools import NOT_CONNECTED, ToolError, score_tool
 from mcp_score.tools.analysis import (
-    MeasureContent,
     get_measure_content,
     get_selection_properties,
     read_passage,
@@ -361,137 +361,90 @@ class TestReadPassage:
         assert connected_bridge.calls == []
 
     @pytest.mark.anyio()
-    async def test_read_passage_reads_cursor_in_every_measure(
+    async def test_passage_delegates_one_read_without_navigation(
         self, connected_bridge: FakeBridge, context: ScoreContext
     ) -> None:
-        # Arrange
-        connected_bridge.reply("get_cursor_info", CURSOR_AT_C4)
+        passage = Passage(
+            start_measure=2,
+            end_measure=3,
+            staves=[1],
+            voices=[2],
+            measures=[],
+            range_complete=True,
+            unsupported=["spanners"],
+        )
+        connected_bridge.reply("read_passage", passage)
 
-        # Act
-        result = await read_passage(context, 2, 3)
+        result = await read_passage(context, 2, 3, staff=1, voice=2)
 
-        # Assert
-        assert (result.start_measure, result.end_measure) == (2, 3)
-        assert result.staff is None
-        assert result.elements == [
-            MeasureContent(measure=2, content=CURSOR_AT_C4),
-            MeasureContent(measure=3, content=CURSOR_AT_C4),
-        ]
+        assert result is passage
+        assert connected_bridge.calls == [BridgeCall("read_passage", (2, 3, 1, 2))]
+
+    @pytest.mark.anyio()
+    async def test_passage_omits_staff_and_voice_to_read_all_tracks(
+        self, connected_bridge: FakeBridge, context: ScoreContext
+    ) -> None:
+        await read_passage(context, 1, 2)
+
         assert connected_bridge.calls == [
-            BridgeCall("go_to_measure", (2,)),
-            BridgeCall("get_cursor_info", ()),
-            BridgeCall("go_to_measure", (3,)),
-            BridgeCall("get_cursor_info", ()),
+            BridgeCall("read_passage", (1, 2, None, None))
         ]
 
     @pytest.mark.anyio()
-    async def test_read_passage_with_staff_moves_to_staff_in_every_measure(
+    async def test_passage_reports_plugin_error_without_cursor_fallback(
         self, connected_bridge: FakeBridge, context: ScoreContext
     ) -> None:
-        # Act
-        await read_passage(context, 1, 2, staff=3)
+        connected_bridge.fail("read_passage", "Unknown command: readPassage")
 
-        # Assert
-        assert connected_bridge.calls_to("go_to_staff") == [
-            BridgeCall("go_to_staff", (3,)),
-            BridgeCall("go_to_staff", (3,)),
+        with pytest.raises(ToolError, match="Unknown command: readPassage"):
+            await read_passage(context, 1, 2)
+
+        assert connected_bridge.calls == [
+            BridgeCall("read_passage", (1, 2, None, None))
         ]
 
     @pytest.mark.anyio()
-    async def test_read_passage_with_navigation_error_stops_reading(
-        self, connected_bridge: FakeBridge, context: ScoreContext
+    @pytest.mark.parametrize(("staff", "voice"), [(-1, None), (None, -1), (0, 4)])
+    async def test_passage_rejects_invalid_track_before_reading(
+        self,
+        connected_bridge: FakeBridge,
+        context: ScoreContext,
+        staff: int | None,
+        voice: int | None,
     ) -> None:
-        # Arrange
-        connected_bridge.fail("go_to_measure", NAVIGATION_ERROR)
+        with pytest.raises(ToolError):
+            await read_passage(context, 1, 1, staff=staff, voice=voice)
 
-        # Act
-        with pytest.raises(ToolError, match=NAVIGATION_ERROR):
-            await read_passage(context, 99, 100)
-
-        # Assert
-        assert connected_bridge.calls == [BridgeCall("go_to_measure", (99,))]
-
-    @pytest.mark.anyio()
-    async def test_read_passage_attaches_content_reading_limitation(
-        self, registry: BridgeRegistry, context: ScoreContext
-    ) -> None:
-        # Arrange
-        registry.active = FakeBridge(content_reading_limitation=LIMITATION)
-
-        # Act
-        result = await read_passage(context, 1, 1)
-
-        # Assert
-        assert result.warning == LIMITATION
-
-    @pytest.mark.anyio()
-    async def test_read_passage_without_limitation_has_no_warning(
-        self, connected_bridge: FakeBridge, context: ScoreContext
-    ) -> None:
-        # Act
-        result = await read_passage(context, 1, 1)
-
-        # Assert
-        assert result.warning is None
+        assert connected_bridge.calls == []
 
 
 class TestGetMeasureContent:
     @pytest.mark.anyio()
-    async def test_get_measure_with_invalid_number_raises_without_navigating(
+    async def test_measure_reads_contents_without_selecting(
         self, connected_bridge: FakeBridge, context: ScoreContext
     ) -> None:
-        # Act
+        result = await get_measure_content(context, 3, staff=1, voice=0)
+
+        assert result.source == "live"
+        assert connected_bridge.calls == [BridgeCall("read_passage", (3, 3, 1, 0))]
+
+    @pytest.mark.anyio()
+    async def test_measure_rejects_invalid_number_without_reading(
+        self, connected_bridge: FakeBridge, context: ScoreContext
+    ) -> None:
         with pytest.raises(ToolError, match="measure must be >= 1"):
             await get_measure_content(context, 0)
 
-        # Assert
         assert connected_bridge.calls == []
 
     @pytest.mark.anyio()
-    async def test_get_measure_navigates_then_selects(
+    async def test_measure_rejects_invalid_track_without_reading(
         self, connected_bridge: FakeBridge, context: ScoreContext
     ) -> None:
-        # Arrange
-        connected_bridge.reply("select_measure", CursorPosition(measure=3, staff=1))
+        with pytest.raises(ToolError, match="staff must be >= 0"):
+            await get_measure_content(context, 1, staff=-1)
 
-        # Act
-        result = await get_measure_content(context, 3, staff=1)
-
-        # Assert
-        assert (result.measure, result.staff) == (3, 1)
-        assert result.warning is None
-        assert connected_bridge.calls == [
-            BridgeCall("go_to_measure", (3,)),
-            BridgeCall("go_to_staff", (1,)),
-            BridgeCall("select_measure", ()),
-        ]
-
-    @pytest.mark.anyio()
-    async def test_get_measure_with_staff_error_does_not_select(
-        self, connected_bridge: FakeBridge, context: ScoreContext
-    ) -> None:
-        # Arrange
-        connected_bridge.fail("go_to_staff", "No staff 7")
-
-        # Act
-        with pytest.raises(ToolError, match="No staff 7"):
-            await get_measure_content(context, 1, staff=7)
-
-        # Assert
-        assert connected_bridge.calls_to("select_measure") == []
-
-    @pytest.mark.anyio()
-    async def test_get_measure_attaches_content_reading_limitation(
-        self, registry: BridgeRegistry, context: ScoreContext
-    ) -> None:
-        # Arrange
-        registry.active = FakeBridge(content_reading_limitation=LIMITATION)
-
-        # Act
-        result = await get_measure_content(context, 1)
-
-        # Assert
-        assert result.warning == LIMITATION
+        assert connected_bridge.calls == []
 
 
 class TestGetSelectionProperties:

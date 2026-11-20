@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from mcp_score.bridge import BridgeError
 from mcp_score.bridge.musescore import DEFAULT_PORT, MuseScoreBridge
+from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -488,3 +489,112 @@ class TestMuseScoreBridgePing:
 
         # Act / Assert
         assert await bridge.ping() is False
+
+
+class TestMuseScorePassageReads:
+    @pytest.mark.anyio()
+    async def test_read_passage_uses_one_command_and_validates_all_events(self) -> None:
+        events = [
+            {
+                "kind": "chord",
+                "type": CHORD_ELEMENT_TYPE,
+                "staff": 1,
+                "voice": 2,
+                "tick": 1920 + index * 480,
+                "offset": {"numerator": index, "denominator": 4},
+                "duration": {"numerator": 1, "denominator": 4},
+                "actualDuration": {"numerator": 1, "denominator": 4},
+                "notes": [
+                    {"pitch": pitch, "tpc": tpc, "name": name, "displayedTpc": tpc}
+                ],
+            }
+            for index, (pitch, tpc, name) in enumerate(
+                [(71, 19, "B4"), (69, 17, "A4"), (67, 15, "G4"), (65, 13, "F4")]
+            )
+        ]
+        bridge, connection = await _connected_bridge(
+            {
+                "result": {
+                    "source": "live",
+                    "startMeasure": 2,
+                    "endMeasure": 2,
+                    "staves": [1],
+                    "voices": [2],
+                    "rangeComplete": True,
+                    "unsupported": ["spanners"],
+                    "measures": [
+                        {
+                            "measure": 2,
+                            "tick": 1920,
+                            "timeSignature": {"numerator": 4, "denominator": 4},
+                            "events": events,
+                        }
+                    ],
+                }
+            }
+        )
+
+        passage = await bridge.read_passage(2, 2, staff=1, voice=2)
+
+        assert isinstance(passage, Passage)
+        assert [event.notes[0].name for event in passage.measures[0].events] == [
+            "B4",
+            "A4",
+            "G4",
+            "F4",
+        ]
+        assert passage.measures[0].events[-1].actual_duration == Duration(
+            numerator=1, denominator=4
+        )
+        assert sent_payloads(connection) == [
+            {
+                "command": "readPassage",
+                "params": {
+                    "startMeasure": 2,
+                    "endMeasure": 2,
+                    "staff": 1,
+                    "voice": 2,
+                },
+            }
+        ]
+
+    @pytest.mark.anyio()
+    async def test_old_plugin_rejection_is_not_replaced_by_partial_cursor_read(
+        self,
+    ) -> None:
+        bridge, connection = await _connected_bridge(
+            {"error": "Unknown command: readPassage"}
+        )
+
+        with pytest.raises(BridgeError, match="Unknown command: readPassage"):
+            await bridge.read_passage(1, 1)
+
+        assert [payload["command"] for payload in sent_payloads(connection)] == [
+            "readPassage"
+        ]
+
+    @pytest.mark.anyio()
+    async def test_malformed_event_is_a_protocol_error(self) -> None:
+        bridge, _ = await _connected_bridge(
+            {
+                "result": {
+                    "startMeasure": 1,
+                    "endMeasure": 1,
+                    "staves": [0],
+                    "voices": [0],
+                    "measures": [
+                        {
+                            "measure": 1,
+                            "tick": 0,
+                            "timeSignature": None,
+                            "events": [{"kind": "chord", "notes": []}],
+                        }
+                    ],
+                    "rangeComplete": True,
+                    "unsupported": [],
+                }
+            }
+        )
+
+        with pytest.raises(BridgeError, match="unexpected reply"):
+            await bridge.read_passage(1, 1)
