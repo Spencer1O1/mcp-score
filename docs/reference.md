@@ -778,6 +778,99 @@ No parameters.
 | `measure` | `int` | Measure number (1-indexed). |
 | `staff`   | `int` | Staff index (0-indexed).    |
 
+## Note_rest tools
+
+Guarded time-preserving rest/note replacement in the live application.
+
+### `fill_live_rest`
+
+Replace a plain rest onset with one pitched note, leaving trailing rests.
+
+MuseScore 4.7+ in major version 4 only. Pass ALL fresh get_measure_content
+events filtered to the explicit staff and voice as expected. This snapshot
+is matched atomically before any mutation. A canonical undotted whole through
+32nd note must fit entirely in the original rest and bar. Ordinary full-measure
+rests require a regular 4/4 bar; pickups and irregular full-measure rests reject.
+No occupied time is overwritten or shifted. Native suffix rests may be dotted
+or split; their exact contiguous coverage is verified, with other measure
+tracks, adjacent measure events, exposed context and spanner metadata.
+
+Pitch is concert MIDI; tpc is concert spelling (C=14, F#=20). Native staff
+transposition supplies written TPC without changing the score display mode.
+Dotted targets, beams, attachments, tuplets, ties, grace notes, microtonality,
+drum/tab, nonunit time stretch and intersecting/unknown spanners reject.
+Actual before/after all-track measure events are returned after one undo step.
+UI selection/layout may change; the logical bridge cursor stays put. Snapshot
+coverage is exposed notation, not full engraving or score identity/revision;
+identical contents in another score cannot be distinguished. Not available
+with Dorico. No sequence or mutation-receipt support; never automatically
+retry this mutation after an uncertain response.
+
+| Parameter  | Type                          | Default    | Description |
+| ---------- | ----------------------------- | ---------- | ----------- |
+| `measure`  | `int`                         | (required) |             |
+| `staff`    | `int`                         | (required) |             |
+| `voice`    | `int`                         | (required) |             |
+| `offset`   | `WholeNoteFraction`           | (required) |             |
+| `duration` | `WholeNoteFraction`           | (required) |             |
+| `pitch`    | `int`                         | (required) |             |
+| `tpc`      | `int`                         | (required) |             |
+| `expected` | `list[ExpectedDurationEvent]` | (required) |             |
+
+**Returns** `NoteRestEdit`: Actual all-track measure events, reread after structural replacement.
+
+| Field              | Type                 | Description |
+| ------------------ | -------------------- | ----------- |
+| `measure`          | `int`                |             |
+| `staff`            | `int`                |             |
+| `voice`            | `int`                |             |
+| `before`           | `list[PassageEvent]` |             |
+| `after`            | `list[PassageEvent]` |             |
+| `verified`         | `bool`               |             |
+| `mutation_status`  | `str`                |             |
+| `snapshot_scope`   | `str`                |             |
+| `selection_status` | `str`                |             |
+| `limitations`      | `list[str]`          |             |
+
+### `replace_live_note_with_rest`
+
+Replace an ordinary single-tone chord with an equal-duration plain rest.
+
+Supply ALL fresh target staff/voice measure events as expected. Atomic native
+validation and actual all-track read-back prevent partial or stale replacement.
+Only undotted whole through 32nd, ordinary unbeamed single-tone chords without
+lyrics, articulations, other attachments, ties, tuplets, grace notes,
+microtonality or intersecting/unknown spanners are supported. Requires
+MuseScore 4.7+ in major version 4 and pitched non-drum/non-tab staff with unit
+time stretch. Other events, adjacent measures, exposed context and spanner
+metadata are verified unchanged. One undo step, no time shifting. UI selection
+and layout may change; logical bridge cursor is untouched. No app-wide score
+identity/revision or full engraving guarantee. No Dorico, sequence, mutation
+receipts or automatic replay; inspect an uncertain response before proceeding.
+
+| Parameter  | Type                          | Default    | Description |
+| ---------- | ----------------------------- | ---------- | ----------- |
+| `measure`  | `int`                         | (required) |             |
+| `staff`    | `int`                         | (required) |             |
+| `voice`    | `int`                         | (required) |             |
+| `offset`   | `WholeNoteFraction`           | (required) |             |
+| `expected` | `list[ExpectedDurationEvent]` | (required) |             |
+
+**Returns** `NoteRestEdit`: Actual all-track measure events, reread after structural replacement.
+
+| Field              | Type                 | Description |
+| ------------------ | -------------------- | ----------- |
+| `measure`          | `int`                |             |
+| `staff`            | `int`                |             |
+| `voice`            | `int`                |             |
+| `before`           | `list[PassageEvent]` |             |
+| `after`            | `list[PassageEvent]` |             |
+| `verified`         | `bool`               |             |
+| `mutation_status`  | `str`                |             |
+| `snapshot_scope`   | `str`                |             |
+| `selection_status` | `str`                |             |
+| `limitations`      | `list[str]`          |             |
+
 ## Receipts tools
 
 Execute explicitly identified guarded mutations and retrieve their history.

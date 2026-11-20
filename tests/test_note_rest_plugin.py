@@ -20,7 +20,7 @@ _MODULES = ["Constants", "Score", "Passage", "Pitch", "Duration", "Context", "Rh
 _GRAPH = Path(__file__).with_name("note_rest_graph.js").read_text()
 
 
-def _run(change: str = "") -> Any:
+def _run(change: str = "", *, module_source: str | None = None) -> Any:
     sources = {
         name: "\n".join(
             line
@@ -29,9 +29,24 @@ def _run(change: str = "") -> Any:
         )
         for name in _MODULES
     }
+    names = _MODULES.copy()
+    if module_source is not None:
+        sources["Rhythm"] = "\n".join(
+            line for line in module_source.splitlines() if not line.startswith(".")
+        )
+        names.insert(-1, "NoteRestFixture")
+        sources["NoteRestFixture"] = "\n".join(
+            line
+            for line in (
+                Path(__file__).parent / "integration/plugin/note-rest-fixture.js"
+            )
+            .read_text()
+            .splitlines()
+            if not line.startswith(".")
+        )
     script = (
         "const names="
-        + json.dumps(_MODULES)
+        + json.dumps(names)
         + ";const sources="
         + json.dumps(sources)
         + ";"
@@ -40,8 +55,9 @@ def _run(change: str = "") -> Any:
         + "\nconsole.log(JSON.stringify(run()));"
     )
     result = subprocess.run(
-        [_NODE or "node", "-e", script], capture_output=True, text=True, check=True
+        [_NODE or "node", "-e", script], capture_output=True, text=True, check=False
     )
+    assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
@@ -206,3 +222,52 @@ def test_adjacent_measure_damage_triggers_known_scope_cancellation() -> None:
     # Cancellation deliberately cannot restore this simulated external damage.
     assert observed["reply"]["mutation_status"] == "unknown"
     assert observed["cancels"] == 1
+
+
+def test_multiple_native_suffix_rests_are_verified_as_exact_interval_union() -> None:
+    observed = _run(
+        "const input=score.newCursor;score.newCursor=()=>{const c=input();"
+        "const add=c.addNote;c.addNote=p=>{add.call(c,p);"
+        "suffix=[{tick:480,element:rest(480)},{tick:960,element:rest(960)}];"
+        "rebuild();};return c;};"
+    )
+    assert observed["reply"]["result"]["verified"] is True
+    assert len(observed["reply"]["result"]["after"]) == 4
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "suffix[0].tick++;",
+        "suffix[0].element.elements=[{}];",
+        "suffix[0].element.visible=false;",
+        "suffix[0].element.actualDuration=frac(1,2);",
+    ],
+)
+def test_suffix_gap_duration_or_hidden_attachment_cannot_commit(damage: str) -> None:
+    observed = _run(
+        "const input=score.newCursor;score.newCursor=()=>{const c=input();"
+        "const add=c.addNote;c.addNote=p=>{add.call(c,p);"
+        + damage
+        + "rebuild();};return c;};"
+    )
+    assert observed["reply"]["mutation_status"] == "rolled_back"
+    assert observed["history"] == ["prior"]
+
+
+def test_distant_spanner_preserved_and_intersecting_spanner_rejected() -> None:
+    span = (
+        "score.spanners=[{type:1,track:0,spannerTrack2:0,anchor:0,"
+        "spannerTick:frac(3,1),spannerTicks:frac(1,2)}];"
+    )
+    assert _run(span)["reply"]["result"]["verified"] is True
+    rejected = _run(span + "score.spanners[0].spannerTick=frac(1,4);")
+    assert rejected["reply"]["mutation_status"] == "not_applied"
+    assert rejected["starts"] == 0
+
+
+def test_octave_transposing_rest_fill_keeps_requested_concert_midi() -> None:
+    observed = _run("interval.chromatic=12;interval.diatonic=7;")
+    result = NoteRestEdit.model_validate(_snake_case_keys(observed["reply"]["result"]))
+    note = result.after[0].notes[0]
+    assert (note.pitch, note.tpc, note.written_tpc) == (61, 21, 21)

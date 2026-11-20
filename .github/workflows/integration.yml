@@ -134,6 +134,30 @@ jobs:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
 
+      - name: Start disposable note-rest normal fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
+
+      - name: Guarded note-rest normal mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+
+      - name: Start disposable note-rest concert fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
+
+      - name: Guarded note-rest concert mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+
       - name: Start disposable staff-context fixture
         run: |
           uv run scripts/musescore_harness.py stop
@@ -260,6 +284,30 @@ jobs:
         env:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
+
+      - name: Start disposable note-rest normal fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
+
+      - name: Guarded note-rest normal mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+
+      - name: Start disposable note-rest concert fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
+
+      - name: Guarded note-rest concert mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
 
       - name: Start disposable staff-context fixture
         run: |
@@ -389,6 +437,30 @@ jobs:
         env:
           MCP_SCORE_GUARDED_DURATION_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_duration.py -v
+
+      - name: Start disposable note-rest normal fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest.musicxml
+
+      - name: Guarded note-rest normal mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "normal"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
+
+      - name: Start disposable note-rest concert fixture
+        env:
+          MUSESCORE_NOTE_REST_TEST_SETUP: "1"
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-note-rest-concert.musicxml
+
+      - name: Guarded note-rest concert mode and native cancellation tests
+        env:
+          MCP_SCORE_NOTE_REST_FIXTURE: "concert"
+        run: uv run pytest tests/integration/test_musescore_note_rest.py -v
 
       - name: Start disposable staff-context fixture
         run: |

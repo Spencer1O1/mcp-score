@@ -232,6 +232,15 @@ Releases follow [semver](https://semver.org/); versions stay 0.x until the
 tool set is stable, so minor releases may still change tool names and
 parameters.
 
+The guarded note/rest phases start their own `guarded-note-rest.musicxml` and
+`guarded-note-rest-concert.musicxml` fixtures with
+`MUSESCORE_NOTE_REST_TEST_SETUP=1`. Only their marked installed plugin copies
+receive fixed post-rewrite cancellation probes; normal seeding restores the
+packaged source. `MCP_SCORE_NOTE_REST_FIXTURE=normal` or `concert` opts into the
+matching integration test phase. Never opt these phases into a user score or
+normal application profile. Native versions below the supported write API
+actively verify refusal before arming any failure probe.
+
 ### Cutting a release
 
 Release notes live on the [Releases page](https://github.com/tskovlund/mcp-score/releases);

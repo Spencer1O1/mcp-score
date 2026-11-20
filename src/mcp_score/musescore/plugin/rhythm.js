@@ -21,6 +21,7 @@ var limitations = [
 function failure(params, code, message, status, extra) {
     var reply = {error:message,code:code,mutation_status:status,verified:false,
         target:{measure:params.measure,staff:params.staff,voice:params.voice,offset:params.offset},
+        rollback_verified:status === "rolled_back",
         snapshot_scope:"target_voice_measure",selection_status:status === "not_applied" ? "unchanged" : "not_preserved",
         limitations:limitations.slice()};
     Object.keys(extra || {}).forEach(function(name) {reply[name]=extra[name];});
@@ -240,7 +241,9 @@ function edit(plugin,params,fill) {
             fresh.element.notes[0].pitch=params.pitch;
             fresh.element.notes[0].tpc1=params.tpc;
             fresh.element.notes[0].tpc2=params.tpc-facts.delta;
-        } else cursor.addRest();
+        } else {
+            cursor.addRest();
+        }
         // No original element wrappers are used after native replacement.
         var after=Duration.read(plugin,params);
         if (!verify(plugin,params,before,after,resolved.tick,oldLength,newLength,fill,facts)

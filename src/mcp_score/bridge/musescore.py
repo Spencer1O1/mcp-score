@@ -486,14 +486,20 @@ class MuseScoreBridge(WebSocketBridge):
         return await self._run(
             NoteRestEdit,
             MuseScoreCommand.FILL_REST_WITH_NOTE,
-            _camel_case_keys(request.model_dump()),
+            {
+                key: _camel_case_keys(value)
+                for key, value in request.model_dump().items()
+            },
         )
 
     async def replace_note_with_rest(self, request: ReplaceNoteRequest) -> NoteRestEdit:
         return await self._run(
             NoteRestEdit,
             MuseScoreCommand.REPLACE_NOTE_WITH_REST,
-            _camel_case_keys(request.model_dump()),
+            {
+                key: _camel_case_keys(value)
+                for key, value in request.model_dump().items()
+            },
         )
 
     async def set_event_duration(
