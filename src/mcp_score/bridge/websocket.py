@@ -21,8 +21,11 @@ from websockets.exceptions import WebSocketException
 from websockets.protocol import State
 
 from mcp_score.bridge.base import BridgeError, CommandResult, ScoreBridge
+from mcp_score.bridge.locking import TaskLock
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+
     from websockets.asyncio.client import ClientConnection
 
 __all__ = [
@@ -62,6 +65,7 @@ class WebSocketTransport:
         self.uri = uri
         self.receive_timeout = receive_timeout
         self._connection: ClientConnection | None = None
+        self._io_lock = asyncio.Lock()
 
     @property
     def is_open(self) -> bool:
@@ -74,13 +78,23 @@ class WebSocketTransport:
         Raises:
             TransportError: If the server cannot be reached.
         """
-        try:
-            self._connection = await websockets.connect(self.uri)
-        except _CONNECTION_FAILURES as exception:
-            raise TransportError(f"cannot connect to {self.uri}: {exception}") from None
+        async with self._io_lock:
+            if self._connection is not None:
+                await self._discard_connection()
+            try:
+                self._connection = await websockets.connect(self.uri)
+            except _CONNECTION_FAILURES as exception:
+                raise TransportError(
+                    f"cannot connect to {self.uri}: {exception}"
+                ) from None
 
     async def close(self) -> None:
-        """Close the connection; safe to call when already closed."""
+        """Close after an active exchange finishes; safe when already closed."""
+        async with self._io_lock:
+            await self._discard_connection()
+
+    async def _discard_connection(self) -> None:
+        """Discard a cancelled exchange without acquiring its I/O lock again."""
         connection = self._connection
         self._connection = None
         if connection is not None:
@@ -93,13 +107,28 @@ class WebSocketTransport:
         Raises:
             TransportError: If the connection is not open or sending fails.
         """
-        connection = self._require_open()
-        try:
-            await connection.send(json.dumps(payload))
-        except _CONNECTION_FAILURES as exception:
-            raise TransportError(f"send failed: {exception}") from None
+        async with self._io_lock:
+            connection = self._require_open()
+            try:
+                await connection.send(json.dumps(payload))
+            except _CONNECTION_FAILURES as exception:
+                raise TransportError(f"send failed: {exception}") from None
 
     async def request(self, payload: dict[str, Any]) -> CommandResult:
+        """Own the complete request/reply pair and discard cancelled streams.
+
+        Cancellation propagates; it never establishes whether a mutation was
+        applied. Discarding the connection prevents a late reply from being
+        mistaken for the next request's response.
+        """
+        async with self._io_lock:
+            try:
+                return await self._request(payload)
+            except asyncio.CancelledError:
+                await self._discard_connection()
+                raise
+
+    async def _request(self, payload: dict[str, Any]) -> CommandResult:
         """Send one JSON message and return the decoded JSON reply.
 
         Raises:
@@ -162,8 +191,13 @@ class WebSocketBridge(ScoreBridge):
         self.port = port
         self.receive_timeout = receive_timeout
         self._transport: WebSocketTransport | None = None
+        self._operation_lock = TaskLock()
         self.connection_error: str | None = None
         """Why the last connection attempt failed, or None after success."""
+
+    def operation(self) -> AbstractAsyncContextManager[None]:
+        """Own a complete cursor workflow, excluding direct lifecycle changes."""
+        return self._operation_lock.hold()
 
     @property
     def application_name(self) -> str:
@@ -178,33 +212,41 @@ class WebSocketBridge(ScoreBridge):
         return self._transport is not None and self._transport.is_open
 
     async def connect(self) -> bool:
-        if self._transport is not None:
-            await self.disconnect()
-        self.connection_error = None
-        transport = WebSocketTransport(self.uri, self.receive_timeout)
-        try:
-            await transport.open()
-            self._transport = transport
-            await self._on_connected(transport)
-        except TransportError as exception:
-            self.connection_error = str(exception)
-            logger.error("%s: %s", self.application_name, exception)
-            await transport.close()
-            self._transport = None
-            return False
-        logger.info("Connected to %s at %s", self.application_name, self.uri)
-        return True
+        async with self._operation_lock.hold():
+            if self._transport is not None:
+                await self.disconnect()
+            self.connection_error = None
+            transport = WebSocketTransport(self.uri, self.receive_timeout)
+            try:
+                await transport.open()
+                self._transport = transport
+                await self._on_connected(transport)
+            except asyncio.CancelledError:
+                await transport.close()
+                self._transport = None
+                raise
+            except TransportError as exception:
+                self.connection_error = str(exception)
+                logger.error("%s: %s", self.application_name, exception)
+                await transport.close()
+                self._transport = None
+                return False
+            logger.info("Connected to %s at %s", self.application_name, self.uri)
+            return True
 
     async def disconnect(self) -> None:
-        transport = self._transport
-        self._transport = None
-        if transport is None:
-            return
-        if transport.is_open:
-            with contextlib.suppress(TransportError):
-                await self._on_disconnecting(transport)
-        await transport.close()
-        logger.info("Disconnected from %s", self.application_name)
+        async with self._operation_lock.hold():
+            transport = self._transport
+            self._transport = None
+            if transport is None:
+                return
+            try:
+                if transport.is_open:
+                    with contextlib.suppress(TransportError):
+                        await self._on_disconnecting(transport)
+            finally:
+                await transport.close()
+            logger.info("Disconnected from %s", self.application_name)
 
     async def _on_connected(self, transport: WebSocketTransport) -> None:
         """Hook run right after the connection opens (a handshake, typically).
@@ -265,38 +307,40 @@ class WebSocketBridge(ScoreBridge):
         failure after attempting to send one leaves its application outcome
         unknown; the caller must inspect the score before deciding what to do.
         """
-        if not self.is_connected and not await self.connect():
-            raise BridgeError(
-                f"Cannot connect to {self.application_name} at {self.uri}. "
-                f"{self.connection_error}"
-            )
-        transport = self._transport
-        assert transport is not None  # noqa: S101 - established by the line above
-        self._validate_payload(payload)
-        try:
-            return await transport.request(payload)
-        except TransportError as exception:
-            if not self._is_replay_safe(payload):
-                await self.disconnect()
-                raise self._failed_request_error(payload, exception) from exception
-            logger.warning(
-                "%s: %s; reconnecting once for a safe read",
-                self.application_name,
-                exception,
-            )
-        await self.disconnect()
-        if not await self.connect():
-            raise BridgeError(
-                f"Lost connection to {self.application_name} and could not reconnect. "
-                f"{self.connection_error}"
-            )
-        transport = self._transport
-        assert transport is not None  # noqa: S101 - established by connect()
-        self._validate_payload(payload)
-        try:
-            return await transport.request(payload)
-        except TransportError as exception:
+        async with self._operation_lock.hold():
+            if not self.is_connected and not await self.connect():
+                raise BridgeError(
+                    f"Cannot connect to {self.application_name} at {self.uri}. "
+                    f"{self.connection_error}"
+                )
+            transport = self._transport
+            assert transport is not None  # noqa: S101 - established by the line above
+            self._validate_payload(payload)
+            try:
+                return await transport.request(payload)
+            except TransportError as exception:
+                if not self._is_replay_safe(payload):
+                    await self.disconnect()
+                    raise self._failed_request_error(payload, exception) from exception
+                logger.warning(
+                    "%s: %s; reconnecting once for a safe read",
+                    self.application_name,
+                    exception,
+                )
             await self.disconnect()
-            raise BridgeError(
-                f"{self.application_name} request failed: {exception}"
-            ) from None
+            if not await self.connect():
+                raise BridgeError(
+                    f"Lost connection to {self.application_name} "
+                    "and could not reconnect. "
+                    f"{self.connection_error}"
+                )
+            transport = self._transport
+            assert transport is not None  # noqa: S101 - established by connect()
+            self._validate_payload(payload)
+            try:
+                return await transport.request(payload)
+            except TransportError as exception:
+                await self.disconnect()
+                raise BridgeError(
+                    f"{self.application_name} request failed: {exception}"
+                ) from None

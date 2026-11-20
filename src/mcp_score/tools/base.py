@@ -13,8 +13,9 @@ an edit.
 from __future__ import annotations
 
 import functools
+import inspect
 import json
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -63,12 +64,21 @@ def score_tool[**P, R](tool: Tool[P, R]) -> Tool[P, R]:
     The wrapped function keeps its signature, which is what the MCP server
     reads to describe the tool's parameters and result to the model. Errors
     with details retain a JSON envelope in ToolError's text because the SDK
-    does not expose structured metadata on that exception.
+    does not expose structured metadata on that exception. Context-bearing
+    live tools own their registry workflow until all awaited steps complete;
+    generation and rendering tools do not acquire an application scope.
     """
+
+    signature = inspect.signature(tool)
 
     @functools.wraps(tool)
     async def deliver(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
+            if "context" in signature.parameters:
+                arguments = signature.bind(*args, **kwargs).arguments
+                context = cast("ScoreContext", arguments["context"])
+                async with registry_of(context).operation():
+                    return await tool(*args, **kwargs)
             return await tool(*args, **kwargs)
         except BridgeError as error:
             message = (
