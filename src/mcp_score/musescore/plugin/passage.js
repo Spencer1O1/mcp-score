@@ -143,6 +143,15 @@ function describeEvent(plugin, element, staff, voice, tick, measureTick) {
     };
 }
 
+function includeEventUnsupported(unsupported, event) {
+    var missingLyrics = "attached lyrics (native wrapper unavailable)";
+    var missingArticulations = "chord articulations (native wrapper unavailable before MuseScore 4.6)";
+    if (event.kind !== "other" && event.lyrics === null
+            && unsupported.indexOf(missingLyrics) < 0) unsupported.push(missingLyrics);
+    if (event.kind === "chord" && event.articulations === null
+            && unsupported.indexOf(missingArticulations) < 0) unsupported.push(missingArticulations);
+}
+
 function indices(count, selected) {
     if (selected !== null && selected !== undefined) return [selected];
     var result = [];
@@ -182,8 +191,7 @@ function readPassage(plugin, params) {
     }
     var measures = [];
     var eventCount = 0;
-    var unavailableLyrics = false;
-    var unavailableArticulations = false;
+    var unsupported = unsupportedNotation.slice();
     for (; measureNumber <= end; measureNumber++) {
         if (!measure) return { error: "Measure out of range: " + measureNumber };
         if (!measure.firstSegment) {
@@ -222,13 +230,7 @@ function readPassage(plugin, params) {
         }
         eventCount += events.length;
         for (var eventIndex = 0; eventIndex < events.length; eventIndex++) {
-            var currentEvent = events[eventIndex];
-            if (currentEvent.kind !== "other" && currentEvent.lyrics === null) {
-                unavailableLyrics = true;
-            }
-            if (currentEvent.kind === "chord" && currentEvent.articulations === null) {
-                unavailableArticulations = true;
-            }
+            includeEventUnsupported(unsupported, events[eventIndex]);
         }
         measures.push({
             measure: measureNumber,
@@ -241,11 +243,6 @@ function readPassage(plugin, params) {
             events: events
         });
         measure = measure.nextMeasure;
-    }
-    var unsupported = unsupportedNotation.slice();
-    if (unavailableLyrics) unsupported.push("attached lyrics (native wrapper unavailable)");
-    if (unavailableArticulations) {
-        unsupported.push("chord articulations (native wrapper unavailable before MuseScore 4.6)");
     }
     return {
         result: {

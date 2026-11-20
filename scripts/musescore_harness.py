@@ -486,6 +486,41 @@ def seed_configuration(layout: Layout) -> None:
     shutil.rmtree(layout.data_dir / "session", ignore_errors=True)
 
 
+def _install_selection_fixture(layout: Layout) -> None:
+    """Add a fixed native-selection test driver only to the marked installed copy."""
+    validate_artifact_boundary(layout)
+    marker = layout.root / PROFILE_MARKER
+    if (
+        not unlinked_log_source(marker, layout.root)
+        or not marker.is_file()
+        or marker.read_text() != PROFILE_MARKER_CONTENT
+    ):
+        raise HarnessError("Selection fixture requires a marked owned profile")
+    target = layout.plugins_dir / PLUGIN_DIRECTORY_NAME / PLUGIN_QML_NAME
+    driver = target.with_name("selection-fixture.js")
+    if not all(unlinked_log_source(path, layout.root) for path in (target, driver)):
+        raise HarnessError("Refusing a linked selection fixture destination")
+    text = target.read_text()
+    replacements = {
+        'import "current-selection.js" as CurrentSelection': (
+            'import "current-selection.js" as CurrentSelection\n'
+            'import "selection-fixture.js" as SelectionFixture'
+        ),
+        '"readCurrentSelection": CurrentSelection.readCurrentSelection,': (
+            '"readCurrentSelection": CurrentSelection.readCurrentSelection,\n'
+            '        "_testSelectionSetup": SelectionFixture.setup,'
+        ),
+    }
+    for sentinel in replacements:
+        if text.count(sentinel) != 1:
+            raise HarnessError("Selection fixture QML sentinel is missing or ambiguous")
+    for sentinel, replacement in replacements.items():
+        text = text.replace(sentinel, replacement)
+    source = REPOSITORY_ROOT / "tests/integration/plugin/selection-fixture.js"
+    shutil.copyfile(source, driver)
+    target.write_text(text)
+
+
 def child_environment(settings: Settings) -> dict[str, str]:
     """Isolate child-process application paths without changing HOME."""
     root = settings.layout.root
@@ -1175,6 +1210,8 @@ def start(settings: Settings, score: Path) -> None:
             seed_macos_runner(settings, account)
         else:
             seed_configuration(settings.layout)
+        if os.environ.get("MUSESCORE_SELECTION_TEST_SETUP") == "1":
+            _install_selection_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)

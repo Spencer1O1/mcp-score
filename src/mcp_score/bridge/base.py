@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
+    from mcp_score.bridge.current_selection import CurrentSelection
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
     from mcp_score.bridge.results import (
@@ -135,6 +136,12 @@ class ScoreBridge(ABC):
     @abstractmethod
     async def get_properties(self) -> SelectionProperties:
         """Properties of the current selection."""
+
+    async def read_current_selection(self) -> CurrentSelection:
+        """Read the actual native UI selection without changing it."""
+        raise BridgeError(
+            f"{self.application_name} cannot read the actual UI selection."
+        )
 
     # ── Navigation and selection ────────────────────────────────────
 

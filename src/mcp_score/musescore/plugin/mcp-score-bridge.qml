@@ -21,6 +21,7 @@ import MuseScore 3.0
 
 import "reading.js" as Reading
 import "passage.js" as Passage
+import "current-selection.js" as CurrentSelection
 import "editing.js" as Editing
 import "pitch.js" as Pitch
 import "selection.js" as Selection
@@ -61,6 +62,7 @@ MuseScore {
         "getScore":             Reading.getScore,
         "getCursorInfo":        Reading.getCursorInfo,
         "readPassage":          Passage.readPassage,
+        "readCurrentSelection": CurrentSelection.readCurrentSelection,
         "goToMeasure":          Reading.goToMeasure,
         "goToStaff":            Reading.goToStaff,
         "addNote":              Editing.addNote,

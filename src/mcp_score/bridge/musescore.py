@@ -21,6 +21,7 @@ from mcp_score.bridge.capabilities import (
     MuseScoreDiagnostics,
     PluginCapabilities,
 )
+from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
 from mcp_score.bridge.results import (
@@ -68,6 +69,7 @@ class MuseScoreCommand(StrEnum):
     GET_SCORE = "getScore"
     GET_CURSOR_INFO = "getCursorInfo"
     READ_PASSAGE = "readPassage"
+    READ_CURRENT_SELECTION = "readCurrentSelection"
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
@@ -183,6 +185,7 @@ class MuseScoreBridge(WebSocketBridge):
             MuseScoreCommand.GET_SCORE,
             MuseScoreCommand.GET_CURSOR_INFO,
             MuseScoreCommand.READ_PASSAGE,
+            MuseScoreCommand.READ_CURRENT_SELECTION,
         }
 
     async def send_command(
@@ -252,8 +255,13 @@ class MuseScoreBridge(WebSocketBridge):
         )
 
     async def get_properties(self) -> SelectionProperties:
-        """The cursor position is the closest MuseScore has to selection properties."""
+        """Legacy logical cursor metadata; actual UI selection has a separate read."""
         return SelectionProperties(cursor=await self.get_cursor_info())
+
+    async def read_current_selection(self) -> CurrentSelection:
+        return await self._run(
+            CurrentSelection, MuseScoreCommand.READ_CURRENT_SELECTION
+        )
 
     # ── Navigation and selection ────────────────────────────────────
 
