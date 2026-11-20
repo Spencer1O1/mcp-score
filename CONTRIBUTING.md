@@ -100,9 +100,11 @@ uv run scripts/musescore_harness.py stop
 ```
 
 `start` rewrites MuseScore's user configuration: it installs the plugin,
-replaces `extensions/config.json` (other plugins end up disabled) and
-`shortcuts.xml` (custom shortcuts are lost), sets the startup preferences that
-suppress the first-launch and welcome dialogs, and deletes the saved session.
+replaces `extensions/config.json` (other plugins end up disabled), sets startup
+preferences to suppress first-launch, welcome, and update dialogs, and deletes the saved
+session. Existing shortcuts are preserved. Startup opens the bridge through the
+Plugins menu instead of depending on a custom shortcut. The test profile and
+desktop must use English menu labels.
 Use a throwaway `HOME` on a machine where you use MuseScore yourself.
 
 The harness reads these environment variables:
