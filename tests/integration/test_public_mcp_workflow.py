@@ -223,6 +223,7 @@ def _applied(receipt: MutationReceipt) -> bool:
         receipt.status == "completed"
         and isinstance(result, dict)
         and result.get("mutationStatus") == "applied"
+        and result.get("verified") is True
     )
 
 
@@ -304,6 +305,8 @@ async def _scenario(session: ClientSession) -> None:
         receipt = await _call(
             session, MutationReceipt, "execute_mutation_once", request
         )
+        assert receipt.operation_id == identity["operation_id"]
+        assert receipt.plugin_session == identity["expected_plugin_session"]
         assert _applied(receipt) and not receipt.cached and receipt.historical
         assert receipt.original_reply is not None
         edit = PitchEdit.model_validate(
@@ -357,6 +360,13 @@ async def _scenario(session: ClientSession) -> None:
                             MutationReceipt,
                             "read_mutation_receipt",
                             stale_identity,
+                        )
+                        assert (
+                            stale_history.operation_id == stale_identity["operation_id"]
+                        )
+                        assert (
+                            stale_history.plugin_session
+                            == stale_identity["expected_plugin_session"]
                         )
                         original = stale_history.original_reply or {}
                         if (
