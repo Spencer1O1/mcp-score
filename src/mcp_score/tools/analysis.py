@@ -10,6 +10,7 @@ from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.event_address import EventAddress, LocatedEvent, locate_event
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import SelectionProperties
+from mcp_score.bridge.staff_context import StaffContext, StaffContextRequest
 from mcp_score.context import ScoreContext
 from mcp_score.tools import (
     ToolError,
@@ -23,6 +24,52 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
 __all__ = ["register"]
+
+
+@score_tool
+async def read_staff_context(
+    context: ScoreContext,
+    start_measure: StrictInt,
+    end_measure: StrictInt,
+    staff: StrictInt | None = None,
+) -> StaffContext:
+    """Read effective native staff context at passage start and observed changes.
+
+    Separate from event reads: no voice filtering, cursor creation or tempo query.
+    Direct native getters return instrument, raw clef/key codes, local meter,
+    time stretch and full chromatic/diatonic transposition on MuseScore 4.6+.
+    4.4 returns instrument-only observations with unavailable field reasons.
+    Position precision is native_fraction on 4.6+, native_integer_ticks on 4.4;
+    absolute_time and offset use whole notes, tick is supplementary integer data.
+    Meter spelling is preserved separately from actual pickup/irregular length.
+
+    Native segments are sampled within half-open measures, including changes
+    without notes in an otherwise empty voice. Unchanged samples are coalesced.
+    sampling_complete confirms traversal of bounded samples, not full context
+    fidelity. Missing getters return null plus reasons. Tempo, custom key notation,
+    written pitch/octave and displayed measure labels remain unsupported.
+    No guessing key modes/names or toggling concert pitch. No score revision or
+    identity guarantees. Maximum 64 measures, 4096 staff-by-point samples and
+    bounded traversal; excess requests fail without partial timelines. Not Dorico.
+
+    Args:
+        start_measure: First ordinal measure (1-indexed, inclusive).
+        end_measure: Last ordinal measure (1-indexed, inclusive).
+        staff: Zero-based staff index; omit to query every staff independently.
+    """
+    try:
+        request = StaffContextRequest(
+            start_measure=start_measure,
+            end_measure=end_measure,
+            staff=staff,
+        )
+    except ValidationError as error:
+        raise ToolError(f"Invalid context range: {error}") from error
+    if request.end_measure < request.start_measure:
+        raise ToolError("end_measure must be >= start_measure")
+    return await require_bridge(context).read_staff_context(
+        request.start_measure, request.end_measure, request.staff
+    )
 
 
 @score_tool
@@ -177,6 +224,7 @@ async def get_selection_properties(context: ScoreContext) -> SelectionProperties
 
 def register(server: MCPServer) -> None:
     for tool in (
+        read_staff_context,
         read_passage,
         get_measure_content,
         get_event_at_position,

@@ -36,6 +36,7 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         "ping_score_app",
         # analysis
         "read_passage",
+        "read_staff_context",
         "get_measure_content",
         "get_event_at_position",
         "get_selection_properties",

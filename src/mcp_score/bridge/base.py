@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         TimeSignatureSet,
         Transposed,
     )
+    from mcp_score.bridge.staff_context import StaffContext
 
 __all__ = ["BridgeError", "CommandResult", "ScoreBridge"]
 
@@ -125,6 +126,15 @@ class ScoreBridge(ABC):
     @abstractmethod
     async def get_cursor_info(self) -> CursorInfo:
         """The current position and what is there."""
+
+    async def read_staff_context(
+        self,
+        start_measure: int,
+        end_measure: int,
+        staff: int | None = None,
+    ) -> StaffContext:
+        """Read bounded effective native staff context without a cursor."""
+        raise BridgeError(f"{self.application_name} cannot read native staff context.")
 
     async def read_passage(
         self,

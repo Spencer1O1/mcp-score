@@ -142,6 +142,52 @@ No parameters.
 
 Read live musical contents independently of the application's cursor.
 
+### `read_staff_context`
+
+Read effective native staff context at passage start and observed changes.
+
+Separate from event reads: no voice filtering, cursor creation or tempo query.
+Direct native getters return instrument, raw clef/key codes, local meter,
+time stretch and full chromatic/diatonic transposition on MuseScore 4.6+.
+4.4 returns instrument-only observations with unavailable field reasons.
+Position precision is native_fraction on 4.6+, native_integer_ticks on 4.4;
+absolute_time and offset use whole notes, tick is supplementary integer data.
+Meter spelling is preserved separately from actual pickup/irregular length.
+
+Native segments are sampled within half-open measures, including changes
+without notes in an otherwise empty voice. Unchanged samples are coalesced.
+sampling_complete confirms traversal of bounded samples, not full context
+fidelity. Missing getters return null plus reasons. Tempo, custom key notation,
+written pitch/octave and displayed measure labels remain unsupported.
+No guessing key modes/names or toggling concert pitch. No score revision or
+identity guarantees. Maximum 64 measures, 4096 staff-by-point samples and
+bounded traversal; excess requests fail without partial timelines. Not Dorico.
+
+| Parameter       | Type          | Default    | Description                                                      |
+| --------------- | ------------- | ---------- | ---------------------------------------------------------------- |
+| `start_measure` | `int`         | (required) | First ordinal measure (1-indexed, inclusive).                    |
+| `end_measure`   | `int`         | (required) | Last ordinal measure (1-indexed, inclusive).                     |
+| `staff`         | `int \| None` | `None`     | Zero-based staff index; omit to query every staff independently. |
+
+**Returns** `StaffContext`.
+
+| Field                  | Type                                          | Description                                                              |
+| ---------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| `source`               | `str`                                         |                                                                          |
+| `start_measure`        | `int`                                         |                                                                          |
+| `end_measure`          | `int`                                         |                                                                          |
+| `staves`               | `list[int]`                                   |                                                                          |
+| `native_major_version` | `int`                                         |                                                                          |
+| `native_minor_version` | `int`                                         |                                                                          |
+| `position_precision`   | `"native_fraction" \| "native_integer_ticks"` |                                                                          |
+| `sampling`             | `str`                                         |                                                                          |
+| `sampling_complete`    | `bool`                                        | All bounded samples traversed; does not establish full context fidelity. |
+| `tempo_status`         | `str`                                         |                                                                          |
+| `sampled_point_count`  | `int`                                         |                                                                          |
+| `staff_point_queries`  | `int`                                         |                                                                          |
+| `timelines`            | `list[StaffTimeline]`                         |                                                                          |
+| `limitations`          | `list[str]`                                   |                                                                          |
+
 ### `read_passage`
 
 Read every rhythmic event in an inclusive range of live MuseScore measures.
@@ -779,6 +825,24 @@ An application's reply passed on as it came, for data with no fixed shape.
 
 Whatever fields the application sends.
 
+### `ContextPoint`
+
+| Field                     | Type                          | Description                                                                 |
+| ------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `measure`                 | `int`                         |                                                                             |
+| `tick`                    | `int`                         | Supplementary native integer tick; use absolute_time for exact positioning. |
+| `absolute_time`           | `Duration`                    |                                                                             |
+| `offset`                  | `Duration`                    |                                                                             |
+| `measure_nominal_meter`   | `TimeSignature`               |                                                                             |
+| `measure_actual_duration` | `Duration`                    |                                                                             |
+| `instrument`              | `InstrumentContext \| None`   |                                                                             |
+| `native_clef_type`        | `int \| None`                 | Raw Staff.clefType code, not a name or written-pitch conversion.            |
+| `native_key`              | `int \| None`                 | Raw Staff.key value; custom key notation and mode are not represented.      |
+| `local_meter`             | `TimeSignature \| None`       |                                                                             |
+| `time_stretch`            | `Duration \| None`            |                                                                             |
+| `native_transposition`    | `NativeTransposition \| None` |                                                                             |
+| `unavailable_fields`      | `list[UnavailableField]`      |                                                                             |
+
 ### `CursorInfo`
 
 The cursor position and what is there.
@@ -882,6 +946,15 @@ Every event in the fresh target voice's complete measure read.
 | `kind`    | `str`              |             |
 | `request` | `PitchEditRequest` |             |
 
+### `InstrumentContext`
+
+| Field           | Type          | Description |
+| --------------- | ------------- | ----------- |
+| `instrument_id` | `str \| None` |             |
+| `musicxml_id`   | `str \| None` |             |
+| `long_name`     | `str \| None` |             |
+| `short_name`    | `str \| None` |             |
+
 ### `JsonValue`
 
 | Field | Type | Description |
@@ -899,6 +972,13 @@ Negotiated plugin capabilities and the Python server's package version.
 | `sequence_commands` | `list[str]`                   | Commands accepted as steps of processSequence.                              |
 | `receipts`          | `ReceiptCapabilities \| None` | Optional receipt protocol; null plugins cannot execute receipted mutations. |
 | `server_version`    | `str`                         |                                                                             |
+
+### `NativeTransposition`
+
+| Field       | Type  | Description                                                    |
+| ----------- | ----- | -------------------------------------------------------------- |
+| `chromatic` | `int` | Native chromatic steps, including full octave multiples.       |
+| `diatonic`  | `int` | Native diatonic steps; not inferred from a semitone remainder. |
 
 ### `Note`
 
@@ -1041,12 +1121,27 @@ Native half-open range bounds; these do not describe selection filters.
 | `start_staff`         | `int`         |                                                                           |
 | `end_staff_exclusive` | `int`         | Exclusive staff boundary, matching native staffEnd/selectRange semantics. |
 
+### `StaffTimeline`
+
+| Field     | Type                 | Description                                                        |
+| --------- | -------------------- | ------------------------------------------------------------------ |
+| `staff`   | `int`                |                                                                    |
+| `start`   | `ContextPoint`       |                                                                    |
+| `changes` | `list[ContextPoint]` | Observed value changes at native segment positions, in time order. |
+
 ### `TimeSignature`
 
 | Field         | Type  | Description |
 | ------------- | ----- | ----------- |
 | `numerator`   | `int` |             |
 | `denominator` | `int` |             |
+
+### `UnavailableField`
+
+| Field    | Type  | Description                                                       |
+| -------- | ----- | ----------------------------------------------------------------- |
+| `field`  | `str` | Public snake_case field path, including nested instrument fields. |
+| `reason` | `str` |                                                                   |
 
 ### `WholeNoteFraction`
 

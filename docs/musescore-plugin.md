@@ -721,3 +721,69 @@ avoids Windows known-folder cache writes without disabling snapshot assertions.
 See [Qt's graphics configuration implementation](https://github.com/qt/qtdeclarative/blob/v6.9.3/src/quick/items/qquickgraphicsconfiguration.cpp).
 Linux and Windows CI additionally check that the ordinary profile remains
 unchanged across startup, fixture changes, and cleanup.
+
+## Effective native staff context
+
+`read_staff_context(start_measure, end_measure, staff=None)` uses the separate
+`readStaffContext` command. The inclusive ordinal range is sampled at its start
+and native segment positions, independently for each requested staff and without
+a voice filter. Direct native lookups include changes preceding the requested
+range and changes at segments with no event in an empty voice. Unchanged samples
+are coalesced into per-staff `start` and `changes` timelines. Existing event reads
+and guarded edit snapshots are unchanged.
+
+On MuseScore 4.6+, each point uses the actual native fraction for `absolute_time`
+and the exact whole-note `offset` from its measure start. `tick` is supplementary
+native integer data; it can round a finer fractional position. Measures use
+half-open bounds, so end-barline samples at the next measure start belong to the
+next measure. `measure_nominal_meter` retains meter spelling (4/4 is not reduced
+to 1/1); `measure_actual_duration` independently describes pickups and irregular
+lengths.
+
+The reader returns effective instrument ID/names, raw `Staff.clefType` and
+`Staff.key` codes, `Staff.timeSig(...).timesig`, `Staff.timeStretch`, and both
+chromatic and diatonic components of `Staff.transpose`. Octave components are
+retained; the interval is never reduced to a pitch-class remainder. Native key
+and clef codes are not guessed names, key modes, or a conversion between written
+and concert notation. Instrument metadata comes from `Part.instrumentAtTick`,
+not the part's first-instrument properties. Native app major/minor facts are
+returned separately from plugin/server versions.
+
+On 4.4 the direct staff getters and exact fractional lookup are unavailable.
+The tool returns instrument-only observations with `position_precision:
+"native_integer_ticks"`; these are samples at exposed integer positions, not a
+claim of arbitrary fractional precision. Missing component getters or metadata
+return null and named `unavailable_fields` reasons on all versions. Each `field`
+uses the public snake_case path, such as `native_key` or
+`instrument.musicxml_id`. A missing
+local time-signature object is not replaced with a guessed effective meter.
+
+`sampling_complete` means all bounded start/segment samples were traversed,
+**not complete context fidelity**. Changes without exposed segment anchors,
+custom/atonal key notation and mode, full written pitch/octave, playback offsets
+and displayed measure labels remain unsupported. `tempo_status: "not_queried"`
+is deliberate: this command never creates or positions a cursor. Native
+`Cursor.rewindToFraction` can create a TimeTick anchor and update layout, even
+when used by an otherwise independent cursor. This first slice avoids that path
+entirely and does not toggle concert pitch. It provides no persistent score
+identity or revision.
+
+Requests are limited to 64 measures and 4096 staff-by-point samples, with bounded
+measure/segment traversal and exact arithmetic. The complete sampling cost is
+checked before native instrument/staff queries. Oversized or unrepresentable
+ranges fail without truncated timelines. The negotiated command is read-only,
+can reconnect through the safe-read path, and is excluded from mutation
+sequences. There are no selection, logical cursor, score or undo commands in its
+handler. Tests verify the observable contents, selection, cursor and undo
+behavior; they do not claim native dirty-state or viewport inspection.
+
+Native evidence:
+[4.4 instrument lookup](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/part.h),
+[4.6 direct staff wrappers](https://github.com/musescore/MuseScore/blob/v4.6.2/src/engraving/api/v1/elements.cpp),
+[4.7 native transposition](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/dom/staff.cpp),
+and [cursor anchor creation](https://github.com/musescore/MuseScore/blob/v4.6.2/src/engraving/api/v1/cursor.cpp).
+The isolated MusicXML fixture tests ordinary local-meter/unit-stretch getters,
+instrument changes, inherited and mid-measure context, pickups, irregular
+lengths and Bb/octave transposition. Non-unit local meter/stretch has offline
+native-API graph coverage; the MusicXML importer does not supply that native
+fixture case. This slice does not complete READ-6.

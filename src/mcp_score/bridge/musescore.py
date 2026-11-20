@@ -49,6 +49,7 @@ from mcp_score.bridge.results import (
     TimeSignatureSet,
     Transposed,
 )
+from mcp_score.bridge.staff_context import StaffContext
 from mcp_score.bridge.websocket import DEFAULT_HOST, TransportError, WebSocketBridge
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ class MuseScoreCommand(StrEnum):
     GET_SCORE = "getScore"
     GET_CURSOR_INFO = "getCursorInfo"
     READ_PASSAGE = "readPassage"
+    READ_STAFF_CONTEXT = "readStaffContext"
     READ_CURRENT_SELECTION = "readCurrentSelection"
     EXECUTE_MUTATION_ONCE = "executeMutationOnce"
     READ_MUTATION_RECEIPT = "readMutationReceipt"
@@ -241,6 +243,7 @@ class MuseScoreBridge(WebSocketBridge):
             MuseScoreCommand.GET_SCORE,
             MuseScoreCommand.GET_CURSOR_INFO,
             MuseScoreCommand.READ_PASSAGE,
+            MuseScoreCommand.READ_STAFF_CONTEXT,
             MuseScoreCommand.READ_CURRENT_SELECTION,
             MuseScoreCommand.READ_MUTATION_RECEIPT,
         }
@@ -292,6 +295,18 @@ class MuseScoreBridge(WebSocketBridge):
 
     async def get_cursor_info(self) -> CursorInfo:
         return await self._run(CursorInfo, MuseScoreCommand.GET_CURSOR_INFO)
+
+    async def read_staff_context(
+        self,
+        start_measure: int,
+        end_measure: int,
+        staff: int | None = None,
+    ) -> StaffContext:
+        return await self._run(
+            StaffContext,
+            MuseScoreCommand.READ_STAFF_CONTEXT,
+            {"startMeasure": start_measure, "endMeasure": end_measure, "staff": staff},
+        )
 
     async def read_passage(
         self,
