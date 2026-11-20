@@ -185,6 +185,27 @@ uncertainty never authorizes a cleanup undo.
 `stop` retains the marked artifacts and logs for inspection. Collect them before
 removing the profile:
 
+Startup also writes a bounded `startup-diagnostics.json` in the marked artifact
+root. It records the latest fixture's phases, UTC/elapsed times, recorded process
+identities, and each launch attempt's status/exit code. A failed attempt's bounded
+stdout tail is retained before the next attempt overwrites stdout. Final failure
+evidence is collected before owned-process cleanup; diagnostic or cleanup errors
+are reported without replacing the original startup error. Startup/retry policy
+is unchanged.
+
+Only verified hosted macOS mode can additionally query the owned application's
+bounded Accessibility window/sheet titles, roles and modal flags. The fixed helper
+rechecks PID/creation-time/executable ownership and every UI element's PID. It
+does not activate windows, perform actions, inspect the global desktop, capture
+screenshots, request permissions, or change preferences. Permission denial,
+unavailable metadata, timeouts and invalid replies are recorded explicitly.
+OS-owned crash dialogs are outside this application's ownership boundary, and
+captured window metadata does not prove which dialog caused a startup failure.
+The native CI proof reuses the first fixture, checks contents/selection/cursor
+and a confirmed own undo sentinel, and accepts explicit permission denial without
+claiming that window capture succeeded. Default/local macOS still refuses before
+profile writes. Log collection applies the same no-follow rules to this report.
+
 ```bash
 uv run scripts/musescore_harness.py collect-logs musescore-logs
 uv run scripts/musescore_harness.py clean
