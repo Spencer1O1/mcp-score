@@ -1366,3 +1366,101 @@ class TestSelectionFixtureDriver:
         with pytest.raises(harness.HarnessError, match="linked"):
             harness._install_selection_fixture(layout)
         assert outside.read_text() == "untouched"
+
+
+class TestPitchBatchFixtureDriver:
+    def test_only_owned_copy_is_patched_and_next_seed_restores_it(
+        self, tmp_path: Path
+    ) -> None:
+        from tests.test_pitch_batch_plugin import _execute
+
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        source = _HARNESS_PATH.parent.parent / "src/mcp_score/musescore/plugin"
+        original = {
+            path.name: path.read_bytes() for path in source.iterdir() if path.is_file()
+        }
+        directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+        harness._install_pitch_batch_fixture(layout)
+        assert {
+            path.name: path.read_bytes() for path in source.iterdir() if path.is_file()
+        } == original
+        assert '"_testArmPitchBatchFault"' in (directory / PLUGIN_QML_NAME).read_text()
+        assert "pitchBatchFault" not in original["pitch-batch.js"].decode()
+        assert not (source / "pitch-batch-fixture.js").exists()
+        observed = _execute(
+            "plugin.pitchBatchFault={armed:true,observed:null};",
+            output="({run:batchRun(),fault:plugin.pitchBatchFault})",
+            batch_source=(directory / "pitch-batch.js").read_text(),
+        )
+        assert observed["run"]["reply"]["mutation_status"] == "rolled_back"
+        assert observed["run"]["starts"] == observed["run"]["cancels"] == 1
+        assert observed["run"]["applications"] == 1
+        assert observed["fault"]["armed"] is False
+        assert observed["fault"]["observed"] == {
+            "pitch": 67,
+            "tpc": 15,
+            "writtenTpc": 15,
+            "requestedPitch": 67,
+            "originalPitch": 60,
+        }
+        harness.seed_configuration(layout)
+        assert (directory / PLUGIN_QML_NAME).read_bytes() == original[PLUGIN_QML_NAME]
+        assert (directory / "pitch-batch.js").read_bytes() == original["pitch-batch.js"]
+        assert not (directory / "pitch-batch-fixture.js").exists()
+
+    @pytest.mark.parametrize(
+        "file,needle",
+        [
+            (PLUGIN_QML_NAME, 'import "pitch-batch.js" as PitchBatch'),
+            ("pitch-batch.js", "Pitch.applyPitchPlan(plans[index]);"),
+        ],
+    )
+    @pytest.mark.parametrize("duplicate", [False, True])
+    def test_all_sentinels_are_checked_before_any_fault_write(
+        self,
+        tmp_path: Path,
+        file: str,
+        needle: str,
+        duplicate: bool,
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+        path = directory / file
+        path.write_text(
+            path.read_text().replace(needle, needle * 2 if duplicate else "")
+        )
+        before = {
+            path.name: path.read_bytes()
+            for path in directory.iterdir()
+            if path.is_file()
+        }
+        with pytest.raises(harness.HarnessError, match="sentinel"):
+            harness._install_pitch_batch_fixture(layout)
+        assert {
+            path.name: path.read_bytes()
+            for path in directory.iterdir()
+            if path.is_file()
+        } == before
+
+    def test_unowned_and_linked_fault_destinations_are_refused(
+        self, tmp_path: Path
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.seed_configuration(layout)
+        with pytest.raises(harness.HarnessError, match="marked owned"):
+            harness._install_pitch_batch_fixture(layout)
+        (layout.root / harness.PROFILE_MARKER).write_text(
+            harness.PROFILE_MARKER_CONTENT
+        )
+        outside = tmp_path / "outside.js"
+        outside.write_text("unchanged")
+        (
+            layout.plugins_dir / PLUGIN_DIRECTORY_NAME / "pitch-batch-fixture.js"
+        ).symlink_to(outside)
+        with pytest.raises(harness.HarnessError, match="linked"):
+            harness._install_pitch_batch_fixture(layout)
+        assert outside.read_text() == "unchanged"

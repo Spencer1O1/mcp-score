@@ -172,3 +172,17 @@ def test_nested_request_models_are_included_in_shared_reference_types() -> None:
     assert "`ExpectedChord`" in rendered
     assert "### `ExpectedChord`" in reference_types
     assert "Exact expected onset." in reference_types
+
+
+def test_discriminated_mutation_union_renders_both_supported_requests() -> None:
+    schema = {
+        "oneOf": [
+            {"$ref": "#/$defs/GuardedPitchMutation"},
+            {"$ref": "#/$defs/GuardedPitchBatchMutation"},
+        ],
+        "discriminator": {"propertyName": "kind"},
+    }
+
+    assert generator.schema_type(schema) == (
+        "GuardedPitchMutation | GuardedPitchBatchMutation"
+    )

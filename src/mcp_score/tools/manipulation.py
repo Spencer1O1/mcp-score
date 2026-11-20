@@ -25,6 +25,11 @@ from mcp_score.bridge.pitch import (
     PitchEditRequest,
     WholeNoteFraction,
 )
+from mcp_score.bridge.pitch_batch import (
+    PitchBatchEdit,
+    PitchBatchRequest,
+    PitchBatchTargets,
+)
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -151,6 +156,38 @@ async def set_live_event_duration(
         request.duration,
         request.expected,
     )
+
+
+@score_tool
+async def set_live_note_pitches(
+    context: ScoreContext,
+    edits: PitchBatchTargets,
+) -> PitchBatchEdit:
+    """Preflight up to 32 independent chord targets, then edit in one undo command.
+
+    Every target uses the existing strict guarded pitch request and a complete
+    fresh chord snapshot. Chords must be distinct, even for different tone
+    indices or equivalent onset fractions. All snapshots, spelling and native
+    eligibility are checked before any write. No navigation or dependent steps.
+    An all-no-op batch creates no undo command. Writes verify actual target
+    pitches, peers, rhythm and fresh exposed metadata, including lyrics and
+    articulations. Expected attachment metadata remains informational.
+    Only a known open command can be cancelled; rolled_back requires re-reading
+    ALL exposed target snapshots. Commit uncertainty is unknown; postcommit
+    failures are applied_unverified. Global undo is never invoked automatically.
+    Scope is target chords, not score identity/revision or non-target contents.
+    No automatic mutation replay. Use execute_mutation_once with kind
+    set_note_pitches for caller-retained duplicate protection; this direct tool
+    has none. Not available with Dorico or an older plugin lacking setNotePitches.
+
+    Args:
+        edits: One through 32 strict pitch requests targeting distinct chords.
+    """
+    try:
+        request = PitchBatchRequest(edits=edits)
+    except ValidationError as error:
+        raise ToolError(f"Invalid pitch batch: {error}") from error
+    return await require_bridge(context).set_note_pitches(request)
 
 
 @score_tool
@@ -414,6 +451,7 @@ def register(server: MCPServer) -> None:
     for tool in (
         add_live_note,
         set_live_note_pitch,
+        set_live_note_pitches,
         set_live_event_duration,
         add_live_rehearsal_mark,
         add_live_chord_symbol,

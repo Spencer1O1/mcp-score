@@ -25,6 +25,7 @@ import "context.js" as StaffContext
 import "current-selection.js" as CurrentSelection
 import "editing.js" as Editing
 import "pitch.js" as Pitch
+import "pitch-batch.js" as PitchBatch
 import "duration.js" as DurationEdit
 import "selection.js" as Selection
 import "sequence.js" as Sequence
@@ -74,6 +75,7 @@ MuseScore {
         "goToStaff":            Reading.goToStaff,
         "addNote":              Editing.addNote,
         "setNotePitch":         Pitch.setNotePitch,
+        "setNotePitches":       PitchBatch.setNotePitches,
         "setEventDuration":     DurationEdit.setEventDuration,
         "addRehearsalMark":     Editing.addRehearsalMark,
         "setBarline":           Editing.setBarline,

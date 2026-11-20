@@ -269,10 +269,37 @@ Live integration fixtures exercise ordinary and reordered chords, stale/no-op
 requests, Bb and octave transposition, and unsupported tied, tuplet, grace,
 and quarter-tone notes across the supported MuseScore matrix.
 
+## Guarded pitch batches
+
+`set_live_note_pitches` accepts `edits`, a list of 1 through 32 complete guarded
+pitch requests. Every target must belong to a distinct native chord; equivalent
+fraction offsets or different tone indices cannot address the same chord twice.
+The individual pitch eligibility and strict coordinate rules above still apply.
+Sequences, navigation, dependent steps and other mutation kinds are excluded.
+
+All targets are resolved, checked against their expected snapshots, and checked
+together again before any write. An entirely unchanged batch opens no undo
+command. Otherwise all writes share one undo command. Every target is read back
+before and after commit. Verification preserves every exposed target-event and
+note field, including lyrics and articulation metadata, except the intended
+pitch/spelling changes. Attachment fields in `expected` remain informational;
+this extra preservation check compares fresh native before/after snapshots.
+
+A failure while the command is still open cancels only that command.
+`rolled_back` requires full serialized target events to match their original
+snapshots; failed cancellation or restoration is `unknown`. A commit attempt
+revokes cancellation authority. A known committed verification failure is
+`applied_unverified`, even when a subsequent read also fails. No global undo or
+automatic mutation replay is attempted. The response's `snapshot_scope` is
+`target_chords`: this does not verify the whole score, other tracks, unexposed
+notation, score identity, revision or the undo stack. Read current state after
+uncertainty rather than blindly retrying or undoing.
+
 ## Retained mutation receipts
 
 `execute_mutation_once` adds duplicate protection to an explicitly identified
-guarded pitch request. Other mutation tools, including `set_live_note_pitch`,
+guarded single-pitch or pitch-batch request. Other mutation tools, including
+`set_live_note_pitch` and `set_live_note_pitches`,
 retain their existing behavior and **do not** gain duplicate protection.
 
 Before the first execution call:
@@ -281,8 +308,9 @@ Before the first execution call:
    `get_musescore_bridge_info`. A null receipt capability requires an upgrade.
 2. Create and retain a unique `operation_id` in the MCP client (a UUID is
    recommended). IDs are global within that plugin instance, not per connection.
-3. Retain the complete `mutation` payload with `kind: set_note_pitch` and its
-   existing strict `PitchEditRequest`, including the fresh expected snapshot.
+3. Retain the complete `mutation` payload: `kind: set_note_pitch` with a strict
+   `PitchEditRequest`, or `kind: set_note_pitches` with `{edits: [...]}`. Include
+   every fresh expected snapshot.
 4. Call `execute_mutation_once` with that ID, the original session as
    `expected_plugin_session`, and the retained mutation.
 
@@ -292,13 +320,14 @@ never automatically replays execution, generates a replacement ID, or substitute
 a new session. Transport/protocol errors retain the caller's ID and session.
 An ordinary transport `request_id` remains a separate correlation ID.
 
-Same ID/session and canonical JSON payload executes the native handler at most
-once and returns retained history thereafter. Object key order is irrelevant;
+Same ID/session and canonical command plus JSON payload executes the native
+handler at most once and returns retained history thereafter. Object key order is irrelevant;
 array order and every supplied payload field matter. Equivalent fractions or
 updated informational metadata can be different payloads and therefore conflict.
 Different payloads under an existing ID fail without replacing the old receipt.
-Unknown operation kinds, reads, batches and other mutations cannot use this
-entry point. The receipt does not extend the pitch guard to score identity,
+Unknown operation kinds, reads and other mutations cannot use this entry point.
+Reusing an ID across single and batch kinds conflicts even if their data overlap.
+The receipt does not extend the pitch guard to score identity,
 global revision or attachment changes.
 
 Receipt statuses are:
@@ -374,7 +403,11 @@ protocol 1. It contains its own `protocolVersion: 1`, `pluginSession`,
 `supportedMutations`, fixed limits and `retention: plugin_session_non_evicting`.
 Older compatible plugins may still serve existing tools; the receipt tools
 require this capability and reject missing/incompatible versions before sending
-a mutation. The native wrapper independently requires `receiptVersion: 1` and
+a mutation. Each requested kind also requires its mapped native command in
+`supportedMutations`; older single-only receipt plugins reject batch execution
+before dispatch. Batch support is additive within receipt protocol 1; the native
+wrapper keeps a fixed allowlist for both kinds. The native wrapper independently
+requires `receiptVersion: 1` and
 the exact expected session. No receipt-to-legacy fallback exists. Reinstall
 matching server/plugin versions when upgrading; older servers with strict
 capability schemas may reject the new additive field.
@@ -431,9 +464,10 @@ verified mutation results.
 
 ### Guarded mutation
 
-| Command        | Params                                                             | Description                                                                                                                        |
-| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `setNotePitch` | `{measure, staff, voice, offset, noteIndex, pitch, tpc, expected}` | Atomically match a complete chord snapshot and change one native note with read-back verification. Top-level only; never replayed. |
+| Command          | Params                                                             | Description                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `setNotePitches` | `{edits: [<guarded pitch params>, ...]}`                           | Preflight up to 32 distinct chords, write and verify all targets in one undo command. Top-level only; never replayed.              |
+| `setNotePitch`   | `{measure, staff, voice, offset, noteIndex, pitch, tpc, expected}` | Atomically match a complete chord snapshot and change one native note with read-back verification. Top-level only; never replayed. |
 
 ### Navigation
 
@@ -468,12 +502,13 @@ verified mutation results.
 
 ### Mutation receipt commands
 
-| Command               | Parameters                                                          | Description                                                                                     |
-| --------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `executeMutationOnce` | `{receiptVersion: 1, operationId, expectedPluginSession, mutation}` | Reserve and execute the guarded pitch mutation once, or return its retained historical receipt. |
-| `readMutationReceipt` | `{receiptVersion: 1, operationId, expectedPluginSession}`           | Look up a receipt in the exact plugin session without executing any mutation.                   |
+| Command               | Parameters                                                          | Description                                                                                                     |
+| --------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `executeMutationOnce` | `{receiptVersion: 1, operationId, expectedPluginSession, mutation}` | Reserve and execute the guarded single or batch pitch mutation once, or return its retained historical receipt. |
+| `readMutationReceipt` | `{receiptVersion: 1, operationId, expectedPluginSession}`           | Look up a receipt in the exact plugin session without executing any mutation.                                   |
 
-`mutation` accepts only `{kind: "set_note_pitch", request: <guarded pitch params>}`.
+`mutation` accepts `{kind: "set_note_pitch", request: <guarded pitch params>}`
+or `{kind: "set_note_pitches", request: {edits: [<guarded pitch params>, ...]}}`.
 These commands cannot be sequence steps. Execution is never automatically
 replayed; receipt lookup is a safe read that rechecks the original session after
 reconnect. Unknown/read-only/other mutation kinds are rejected before native

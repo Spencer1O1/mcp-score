@@ -156,7 +156,7 @@ function result(params, before, after, afterIndex, status) {
     } };
 }
 
-function setNotePitch(plugin, params) {
+function planPitchEdit(plugin, params) {
     var scoreError = Score.requireScore(plugin);
     if (scoreError) return failure(params, "target_unavailable", scoreError.error,
                                    "not_applied");
@@ -214,6 +214,28 @@ function setNotePitch(plugin, params) {
         }
     }
     var displayedTpc = selected.tpc === selected.tpc1 ? params.tpc : writtenTpc;
+    return {params: params, resolved: resolved, before: before, chord: chord,
+        selected: selected, writtenTpc: writtenTpc, displayedTpc: displayedTpc,
+        changed: selected.pitch !== params.pitch || selected.tpc1 !== params.tpc
+            || selected.tpc2 !== writtenTpc};
+}
+
+// No command boundary here: callers must own their known open undo command.
+function applyPitchPlan(plan) {
+    plan.selected.pitch = plan.params.pitch;
+    plan.selected.tpc1 = plan.params.tpc;
+    plan.selected.tpc2 = plan.writtenTpc;
+}
+
+function setNotePitch(plugin, params) {
+    var plan = planPitchEdit(plugin, params);
+    if (plan.error) return plan;
+    var resolved = plan.resolved;
+    var before = plan.before;
+    var chord = plan.chord;
+    var selected = plan.selected;
+    var writtenTpc = plan.writtenTpc;
+    var displayedTpc = plan.displayedTpc;
     if (selected.pitch === params.pitch && selected.tpc1 === params.tpc
             && selected.tpc2 === writtenTpc) {
         return result(params, before, describe(plugin, resolved, params), params.noteIndex,
@@ -225,9 +247,7 @@ function setNotePitch(plugin, params) {
     try {
         score.startCmd("setNotePitch");
         started = true;
-        selected.pitch = params.pitch;
-        selected.tpc1 = params.tpc;
-        selected.tpc2 = writtenTpc;
+        applyPitchPlan(plan);
         var after = describe(plugin, resolved, params);
         if (!matchesEdit(before, after, params.noteIndex, params.pitch, params.tpc,
                          writtenTpc, displayedTpc)) {
