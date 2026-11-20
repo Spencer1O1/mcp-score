@@ -45,6 +45,8 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         "read_mutation_receipt",
         # manipulation
         "add_live_note",
+        "add_live_chord_tone",
+        "remove_live_chord_tone",
         "set_live_note_pitch",
         "set_live_note_pitches",
         "set_live_event_duration",

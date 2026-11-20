@@ -583,6 +583,71 @@ def _install_pitch_batch_fixture(layout: Layout) -> None:
     qml.write_text(qml_text)
 
 
+def _install_chord_tone_fixture(layout: Layout) -> None:
+    """Install fixed post-adoption/deletion faults in the marked test copy only."""
+    validate_artifact_boundary(layout)
+    marker = layout.root / PROFILE_MARKER
+    if (
+        not unlinked_log_source(marker, layout.root)
+        or not marker.is_file()
+        or marker.read_text() != PROFILE_MARKER_CONTENT
+    ):
+        raise HarnessError("Chord-tone fixture requires a marked owned profile")
+    directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+    qml, module = directory / PLUGIN_QML_NAME, directory / "chord-tone.js"
+    driver = directory / "chord-tone-fixture.js"
+    if not all(
+        unlinked_log_source(path, layout.root) for path in (qml, module, driver)
+    ):
+        raise HarnessError("Refusing a linked chord-tone fixture destination")
+    qml_text, module_text = qml.read_text(), module.read_text()
+    qml_replacements = {
+        'import "chord-tone.js" as ChordTone': (
+            'import "chord-tone.js" as ChordTone\n'
+            'import "chord-tone-fixture.js" as ChordToneFixture'
+        ),
+        "property var receiptState: null": (
+            "property var receiptState: null\n    property var chordToneFault: null"
+        ),
+        '"removeChordTone":      ChordTone.removeChordTone,': (
+            '"removeChordTone":      ChordTone.removeChordTone,\n'
+            '        "_testArmChordToneAdd": ChordToneFixture.armAdd,\n'
+            '        "_testArmChordToneRemove": ChordToneFixture.armRemove,\n'
+            '        "_testReadChordToneFault": ChordToneFixture.read,'
+        ),
+    }
+    module_replacements = {
+        '.import "score.js" as Score': (
+            '.import "score.js" as Score\n'
+            '.import "chord-tone-fixture.js" as ChordToneFixture'
+        ),
+        "resolved.chord.add(added);": (
+            "resolved.chord.add(added);\n"
+            '            ChordToneFixture.capture(plugin,resolved.chord,"add",'
+            "before.notes.length);"
+        ),
+        "resolved.chord.remove(resolved.chord.notes[params.noteIndex]);": (
+            "resolved.chord.remove(resolved.chord.notes[params.noteIndex]);\n"
+            '            ChordToneFixture.capture(plugin,resolved.chord,"remove",'
+            "before.notes.length);"
+        ),
+    }
+    if any(qml_text.count(value) != 1 for value in qml_replacements) or any(
+        module_text.count(value) != 1 for value in module_replacements
+    ):
+        raise HarnessError("Chord-tone fixture sentinel is missing or ambiguous")
+    # Validate every path and sentinel before writing any installed fault source.
+    source = REPOSITORY_ROOT / "tests/integration/plugin/chord-tone-fixture.js"
+    driver_text = source.read_text()
+    for value, replacement in qml_replacements.items():
+        qml_text = qml_text.replace(value, replacement)
+    for value, replacement in module_replacements.items():
+        module_text = module_text.replace(value, replacement)
+    driver.write_text(driver_text)
+    module.write_text(module_text)
+    qml.write_text(qml_text)
+
+
 def child_environment(settings: Settings) -> dict[str, str]:
     """Isolate child-process application paths without changing HOME."""
     root = settings.layout.root
@@ -1276,6 +1341,8 @@ def start(settings: Settings, score: Path) -> None:
             _install_selection_fixture(settings.layout)
         if os.environ.get("MUSESCORE_PITCH_BATCH_TEST_SETUP") == "1":
             _install_pitch_batch_fixture(settings.layout)
+        if os.environ.get("MUSESCORE_CHORD_TONE_TEST_SETUP") == "1":
+            _install_chord_tone_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)

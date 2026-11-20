@@ -17,6 +17,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
+    from mcp_score.bridge.chord_tone import (
+        AddChordToneRequest,
+        ChordToneEdit,
+        RemoveChordToneRequest,
+    )
     from mcp_score.bridge.current_selection import CurrentSelection
     from mcp_score.bridge.duration_edit import (
         DurationEdit,
@@ -169,6 +174,12 @@ class ScoreBridge(ABC):
         raise BridgeError(
             f"{self.application_name} does not support mutation receipts."
         )
+
+    async def add_chord_tone(self, request: AddChordToneRequest) -> ChordToneEdit:
+        raise BridgeError(f"{self.application_name} cannot add guarded chord tones.")
+
+    async def remove_chord_tone(self, request: RemoveChordToneRequest) -> ChordToneEdit:
+        raise BridgeError(f"{self.application_name} cannot remove guarded chord tones.")
 
     async def set_note_pitches(self, request: PitchBatchRequest) -> PitchBatchEdit:
         """Preflight distinct chord targets and edit them in one native command."""

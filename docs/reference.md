@@ -379,6 +379,92 @@ available with Dorico.
 | `pitch`    | `int`      |                             |
 | `duration` | `Duration` |                             |
 
+### `add_live_chord_tone`
+
+Match a complete live chord snapshot and add one ordinary sounding tone.
+
+All exposed expected metadata is required and compared, including nullable
+text/lyrics/articulations. Existing notes, rhythm and exposed metadata are
+preserved; duplicate sounding pitches and inconsistent native transposition
+intervals reject before mutation. Written TPC derives from unanimous native
+peer intervals, without a written-octave guess or concert-mode change.
+One native undo command; no navigation or automatic replay. Known-open
+command cancellation is verified by a fresh full target snapshot. Commit
+uncertainty is unknown; known committed failures are applied_unverified.
+UI selection/layout are not preserved; logical cursor is untouched. Scope
+is target contents, without score identity, revision or non-target claims.
+Use execute_mutation_once kind add_chord_tone for duplicate protection;
+this direct tool has none. Not available with Dorico.
+
+| Parameter  | Type                | Default    | Description                                                 |
+| ---------- | ------------------- | ---------- | ----------------------------------------------------------- |
+| `measure`  | `int`               | (required) | Ordinal measure (1-indexed).                                |
+| `staff`    | `int`               | (required) | Staff index (0-indexed).                                    |
+| `voice`    | `int`               | (required) | Voice index (0-3).                                          |
+| `offset`   | `WholeNoteFraction` | (required) | Exact onset as a whole-note fraction.                       |
+| `pitch`    | `int`               | (required) | New sounding MIDI pitch (0-127).                            |
+| `tpc`      | `int`               | (required) | Concert spelling (-1 to 33), consistent with pitch.         |
+| `expected` | `ChordToneSnapshot` | (required) | Complete fresh live chord event, with all exposed metadata. |
+
+**Returns** `ChordToneEdit`: Actual target snapshots; indices are ephemeral within this operation.
+
+| Field               | Type                | Description |
+| ------------------- | ------------------- | ----------- |
+| `operation`         | `"add" \| "remove"` |             |
+| `measure`           | `int`               |             |
+| `note_index_before` | `int \| None`       |             |
+| `note_index_after`  | `int \| None`       |             |
+| `before`            | `PassageEvent`      |             |
+| `after`             | `PassageEvent`      |             |
+| `verified`          | `bool`              |             |
+| `mutation_status`   | `str`               |             |
+| `snapshot_scope`    | `str`               |             |
+| `selection_status`  | `str`               |             |
+| `limitations`       | `list[str]`         |             |
+
+### `remove_live_chord_tone`
+
+Match a complete live chord snapshot and remove one tone, retaining rhythm.
+
+Requires at least two tones and the ordinary pitched-chord eligibility of
+guarded pitch edits. The removed tone must have verified empty native child
+and spanner lists; missing metadata rejects (MuseScore 4.4 cannot remove).
+The selected wrapper is never accessed after deletion; verification and
+rollback use freshly resolved native contents. All exposed expected fields
+are required and compared; surviving notes, lyrics and articulations remain.
+One native undo step. Cancellation only affects its known open command and
+rolled_back requires a full target reread; uncertain commit is unknown and
+known committed verification failures remain applied_unverified. No global
+undo, automatic replay, sequence embedding, score identity or revision claim.
+UI selection/layout are not preserved; logical cursor is untouched. Use
+execute_mutation_once kind remove_chord_tone for caller-retained duplicate
+protection; this direct tool has none. Not available with Dorico.
+
+| Parameter    | Type                | Default    | Description                                                 |
+| ------------ | ------------------- | ---------- | ----------------------------------------------------------- |
+| `measure`    | `int`               | (required) | Ordinal measure (1-indexed).                                |
+| `staff`      | `int`               | (required) | Staff index (0-indexed).                                    |
+| `voice`      | `int`               | (required) | Voice index (0-3).                                          |
+| `offset`     | `WholeNoteFraction` | (required) | Exact onset as a whole-note fraction.                       |
+| `note_index` | `int`               | (required) | Ephemeral tone index in the complete expected snapshot.     |
+| `expected`   | `ChordToneSnapshot` | (required) | Complete fresh live chord event, with all exposed metadata. |
+
+**Returns** `ChordToneEdit`: Actual target snapshots; indices are ephemeral within this operation.
+
+| Field               | Type                | Description |
+| ------------------- | ------------------- | ----------- |
+| `operation`         | `"add" \| "remove"` |             |
+| `measure`           | `int`               |             |
+| `note_index_before` | `int \| None`       |             |
+| `note_index_after`  | `int \| None`       |             |
+| `before`            | `PassageEvent`      |             |
+| `after`             | `PassageEvent`      |             |
+| `verified`          | `bool`              |             |
+| `mutation_status`   | `str`               |             |
+| `snapshot_scope`    | `str`               |             |
+| `selection_status`  | `str`               |             |
+| `limitations`       | `list[str]`         |             |
+
 ### `set_live_note_pitch`
 
 Match a live chord snapshot and change one tone's concert pitch and spelling.
@@ -698,7 +784,7 @@ Execute explicitly identified guarded mutations and retrieve their history.
 
 ### `execute_mutation_once`
 
-Execute one guarded pitch request or batch with a caller-retained ID.
+Execute one supported guarded mutation with a caller-retained ID.
 
 Create and retain a unique operation_id BEFORE the first call. Obtain the
 plugin session from connect_to_musescore/get_musescore_bridge_info. Repeating
@@ -706,8 +792,10 @@ the identical ID, session and complete payload returns retained history;
 changing the payload conflicts. This command is never automatically replayed.
 After a lost response or cancellation, explicitly retry the exact request or
 read its receipt. Never replace the session token automatically after restart.
-Only set_note_pitch and set_note_pitches are supported; legacy mutation
-tools are not protected. Batch targets must be distinct chords, at most 32.
+Supported kinds: set_note_pitch, set_note_pitches, add_chord_tone and
+remove_chord_tone. The matching native command must be advertised; older
+plugins reject unsupported kinds before sending. Direct mutation tools are
+not protected. Batch targets must be distinct chords, at most 32.
 
 Receipt completion means an original native reply was retained, including
 errors; it does not mean the edit succeeded. Replies are HISTORICAL, including
@@ -715,24 +803,24 @@ after undo or further edits, and are not verification of current score state.
 Pending/unknown IDs remain reserved. The bounded non-evicting ledger lasts
 only for that plugin instance. Native score identity is not established.
 
-| Parameter                 | Type                                                | Default    | Description |
-| ------------------------- | --------------------------------------------------- | ---------- | ----------- |
-| `operation_id`            | `str`                                               | (required) |             |
-| `expected_plugin_session` | `str`                                               | (required) |             |
-| `mutation`                | `GuardedPitchMutation \| GuardedPitchBatchMutation` | (required) |             |
+| Parameter                 | Type                                                                                                                 | Default    | Description |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------- | ----------- |
+| `operation_id`            | `str`                                                                                                                | (required) |             |
+| `expected_plugin_session` | `str`                                                                                                                | (required) |             |
+| `mutation`                | `GuardedPitchMutation \| GuardedPitchBatchMutation \| GuardedAddChordToneMutation \| GuardedRemoveChordToneMutation` | (required) |             |
 
 **Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
 
-| Field            | Type                                                   | Description                                                                  |
-| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `plugin_session` | `str`                                                  |                                                                              |
-| `operation_id`   | `str`                                                  |                                                                              |
-| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
-| `command`        | `"setNotePitch" \| "setNotePitches" \| None`           |                                                                              |
-| `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
-| `historical`     | `bool`                                                 |                                                                              |
-| `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
-| `reason`         | `str \| None`                                          | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+| Field            | Type                                                                                | Description                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                                               |                                                                              |
+| `operation_id`   | `str`                                                                               |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                              |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| None` |                                                                              |
+| `cached`         | `bool`                                                                              | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                                              |                                                                              |
+| `original_reply` | `dict \| None`                                                                      | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                                                       | Bounded cause for an unknown receipt; no automatic retry is implied.         |
 
 ### `read_mutation_receipt`
 
@@ -751,16 +839,16 @@ a mutation and remains available when the non-evicting ledger is full.
 
 **Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
 
-| Field            | Type                                                   | Description                                                                  |
-| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `plugin_session` | `str`                                                  |                                                                              |
-| `operation_id`   | `str`                                                  |                                                                              |
-| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
-| `command`        | `"setNotePitch" \| "setNotePitches" \| None`           |                                                                              |
-| `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
-| `historical`     | `bool`                                                 |                                                                              |
-| `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
-| `reason`         | `str \| None`                                          | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+| Field            | Type                                                                                | Description                                                                  |
+| ---------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                                               |                                                                              |
+| `operation_id`   | `str`                                                                               |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"`                              |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| "addChordTone" \| "removeChordTone" \| None` |                                                                              |
+| `cached`         | `bool`                                                                              | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                                              |                                                                              |
+| `original_reply` | `dict \| None`                                                                      | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                                                       | Bounded cause for an unknown receipt; no automatic retry is implied.         |
 
 ## Generate tools
 
@@ -860,11 +948,42 @@ environment.
 
 ## Shared input and result types
 
+### `AddChordToneRequest`
+
+| Field      | Type                | Description |
+| ---------- | ------------------- | ----------- |
+| `measure`  | `int`               |             |
+| `staff`    | `int`               |             |
+| `voice`    | `int`               |             |
+| `offset`   | `WholeNoteFraction` |             |
+| `expected` | `ChordToneSnapshot` |             |
+| `pitch`    | `int`               |             |
+| `tpc`      | `int`               |             |
+
 ### `ApplicationReply`
 
 An application's reply passed on as it came, for data with no fixed shape.
 
 Whatever fields the application sends.
+
+### `ChordToneSnapshot`
+
+All exposed fields from a fresh chord read, including attachment metadata.
+
+| Field             | Type                                | Description |
+| ----------------- | ----------------------------------- | ----------- |
+| `kind`            | `str`                               |             |
+| `type`            | `int`                               |             |
+| `staff`           | `int`                               |             |
+| `voice`           | `int`                               |             |
+| `tick`            | `int`                               |             |
+| `offset`          | `WholeNoteFraction`                 |             |
+| `duration`        | `WholeNoteFraction`                 |             |
+| `actual_duration` | `WholeNoteFraction`                 |             |
+| `notes`           | `list[ExpectedPitchNote]`           |             |
+| `text`            | `str \| None`                       |             |
+| `lyrics`          | `list[PassageLyric] \| None`        |             |
+| `articulations`   | `list[PassageArticulation] \| None` |             |
 
 ### `ContextPoint`
 
@@ -980,6 +1099,13 @@ Every event in the fresh target voice's complete measure read.
 | `displayed_tpc` | `int` |             |
 | `name`          | `str` |             |
 
+### `GuardedAddChordToneMutation`
+
+| Field     | Type                  | Description |
+| --------- | --------------------- | ----------- |
+| `kind`    | `str`                 |             |
+| `request` | `AddChordToneRequest` |             |
+
 ### `GuardedPitchBatchMutation`
 
 | Field     | Type                | Description |
@@ -993,6 +1119,13 @@ Every event in the fresh target voice's complete measure read.
 | --------- | ------------------ | ----------- |
 | `kind`    | `str`              |             |
 | `request` | `PitchEditRequest` |             |
+
+### `GuardedRemoveChordToneMutation`
+
+| Field     | Type                     | Description |
+| --------- | ------------------------ | ----------- |
+| `kind`    | `str`                    |             |
+| `request` | `RemoveChordToneRequest` |             |
 
 ### `InstrumentContext`
 
@@ -1165,6 +1298,17 @@ Coordinates and preconditions that must survive validation unchanged.
 | `max_depth`           | `int`       |             |
 | `max_nodes`           | `int`       |             |
 | `retention`           | `str`       |             |
+
+### `RemoveChordToneRequest`
+
+| Field        | Type                | Description |
+| ------------ | ------------------- | ----------- |
+| `measure`    | `int`               |             |
+| `staff`      | `int`               |             |
+| `voice`      | `int`               |             |
+| `offset`     | `WholeNoteFraction` |             |
+| `expected`   | `ChordToneSnapshot` |             |
+| `note_index` | `int`               |             |
 
 ### `SelectionItem`
 

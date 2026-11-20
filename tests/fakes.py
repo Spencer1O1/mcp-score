@@ -90,6 +90,8 @@ MUSESCORE_HANDSHAKE: dict[str, Any] = {
                 MuseScoreCommand.READ_CURRENT_SELECTION,
                 MuseScoreCommand.EXECUTE_MUTATION_ONCE,
                 MuseScoreCommand.READ_MUTATION_RECEIPT,
+                MuseScoreCommand.ADD_CHORD_TONE,
+                MuseScoreCommand.REMOVE_CHORD_TONE,
                 MuseScoreCommand.SET_NOTE_PITCH,
                 MuseScoreCommand.SET_NOTE_PITCHES,
                 MuseScoreCommand.SET_EVENT_DURATION,
@@ -101,7 +103,12 @@ MUSESCORE_HANDSHAKE: dict[str, Any] = {
         "receipts": {
             "protocolVersion": 1,
             "pluginSession": "test-plugin-session",
-            "supportedMutations": ["setNotePitch", "setNotePitches"],
+            "supportedMutations": [
+                "setNotePitch",
+                "setNotePitches",
+                "addChordTone",
+                "removeChordTone",
+            ],
             "capacity": 64,
             "maxPayloadUnits": 65536,
             "maxReplyUnits": 262144,

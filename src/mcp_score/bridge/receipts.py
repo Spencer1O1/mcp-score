@@ -7,6 +7,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, JsonValue, StrictBool, StrictInt, StrictStr, model_validator
 
 # Pydantic evaluates nested input annotations at runtime.
+from mcp_score.bridge.chord_tone import AddChordToneRequest, RemoveChordToneRequest  # noqa: TC001
 from mcp_score.bridge.pitch import PitchEditRequest  # noqa: TC001
 from mcp_score.bridge.pitch_batch import PitchBatchRequest  # noqa: TC001
 from mcp_score.bridge.results import Result
@@ -15,6 +16,8 @@ __all__ = [
     "RECEIPT_PROTOCOL_VERSION",
     "OperationId",
     "PluginSession",
+    "GuardedAddChordToneMutation",
+    "GuardedRemoveChordToneMutation",
     "GuardedPitchMutation",
     "GuardedPitchBatchMutation",
     "ReceiptMutation",
@@ -50,8 +53,22 @@ class GuardedPitchBatchMutation(Result):
     request: PitchBatchRequest
 
 
+class GuardedAddChordToneMutation(Result):
+    kind: Literal["add_chord_tone"]
+    request: AddChordToneRequest
+
+
+class GuardedRemoveChordToneMutation(Result):
+    kind: Literal["remove_chord_tone"]
+    request: RemoveChordToneRequest
+
+
 ReceiptMutation = Annotated[
-    GuardedPitchMutation | GuardedPitchBatchMutation, Field(discriminator="kind")
+    GuardedPitchMutation
+    | GuardedPitchBatchMutation
+    | GuardedAddChordToneMutation
+    | GuardedRemoveChordToneMutation,
+    Field(discriminator="kind"),
 ]
 
 
@@ -77,7 +94,10 @@ class MutationReceipt(Result):
     plugin_session: PluginSession
     operation_id: OperationId
     status: Literal["not_found", "pending", "completed", "unknown"]
-    command: Literal["setNotePitch", "setNotePitches"] | None
+    command: (
+        Literal["setNotePitch", "setNotePitches", "addChordTone", "removeChordTone"]
+        | None
+    )
     cached: StrictBool
     """Lookup/retrieval response, not proof that an operation completed or applied."""
     historical: Literal[True]
@@ -93,7 +113,12 @@ class MutationReceipt(Result):
                 raise ValueError(
                     "Absent receipt cannot contain an executed command/reply"
                 )
-        elif self.command not in {"setNotePitch", "setNotePitches"}:
+        elif self.command not in {
+            "setNotePitch",
+            "setNotePitches",
+            "addChordTone",
+            "removeChordTone",
+        }:
             raise ValueError("Reserved receipt must identify its command")
         if (self.status == "completed") != (self.original_reply is not None):
             raise ValueError("Only completed receipts contain the original reply")
