@@ -126,7 +126,7 @@ async def test_live_transposing_pitch_preserves_native_written_interval(
 
 
 @pytest.mark.anyio()
-@pytest.mark.parametrize("measure", [2, 3, 4])
+@pytest.mark.parametrize("measure", [2, 3, 4, 5])
 async def test_unsupported_live_targets_reject_without_mutation(
     measure: int,
 ) -> None:

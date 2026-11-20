@@ -84,6 +84,19 @@ function resolve(plugin, params) {
     return { chord: chords[0], tick: tick, measureTick: measure.firstSegment.tick };
 }
 
+/// Accidental cents are separate from note.tuning. Note.accidentalType reads
+/// the native accidental object, so only verified conventional zero-cent
+/// symbols are eligible; missing metadata or future symbols fail closed.
+function conventionalAccidental(plugin, note) {
+    if (!plugin.Accidental || !integer(note.accidentalType)
+            || note.accidental === undefined) return false;
+    var names = ["NONE", "FLAT", "NATURAL", "SHARP", "SHARP2", "FLAT2",
+                 "NATURAL_FLAT", "NATURAL_SHARP", "SHARP_SHARP"];
+    return names.some(function(name) {
+        return integer(plugin.Accidental[name]) && note.accidentalType === plugin.Accidental[name];
+    });
+}
+
 /// All queried eligibility properties are exposed by the native 4.4+ API.
 /// Missing information rejects the edit rather than assuming an ordinary note.
 function supported(plugin, chord) {
@@ -102,6 +115,7 @@ function supported(plugin, chord) {
         }
         if (note.noteType !== plugin.NoteType.NORMAL || note.tieBack !== null
                 || note.tieForward !== null || note.tuning !== 0
+                || !conventionalAccidental(plugin, note)
                 || !validTpc(note.tpc1) || !validTpc(note.tpc2)
                 || !congruentPitch(note.pitch, note.tpc1)) return false;
     }
@@ -251,7 +265,7 @@ function setNotePitch(plugin, params) {
                 status = "rolled_back";
             }
         } catch (rollbackError) {
-            status = "unknown";
+            if (!committed) status = "unknown";
         }
         return failure(params, "verification_failed", String(error), status,
                        { before: before, actual: restored });

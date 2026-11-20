@@ -30,7 +30,10 @@ const controls = {reorder:false,ignoreTpc2:false,throwTpc2:false,peerChange:fals
 function note(pitch,tpc,writtenTpc=tpc) {
     const data = {pitch,tpc1:tpc,tpc2:writtenTpc};
     const result = {data,noteType:0,tieBack:null,tieForward:null,tuning:0,
+        accidental:null,
         is(other) {return other === result;}};
+    Object.defineProperty(result,'accidentalType',{configurable:true,
+        get:()=>result.accidental === null ? 0 : result.accidental?.subtype});
     Object.defineProperty(result,'pitch',{get:()=>data.pitch,set:value=>{
         data.pitch=value;
         if (controls.reorder) chord.notes.sort((a,b)=>a.pitch-b.pitch);
@@ -75,13 +78,17 @@ const score={nstaves:1,firstMeasure:measure,history:['prior user change'],
         }
     }};
 const plugin={curScore:score,Element:{CHORD:93,REST:25},NoteType:{NORMAL:0},
+    Accidental:{NONE:0,FLAT:1,NATURAL:2,SHARP:3,SHARP2:4,FLAT2:5,
+        NATURAL_FLAT:8,NATURAL_SHARP:9,SHARP_SHARP:10,SHARP_SLASH:25},
     cursorMeasure:7,cursorStaff:0,cursorVoice:2};
 function snapshot(){return Passage.describeEvent(plugin,chord,0,0,480,0);}
 const params={measure:1,staff:0,voice:0,offset:{numerator:1,denominator:4},
     noteIndex:0,pitch:67,tpc:15,expected:snapshot()};
 function run(){
     const reply=Pitch.setNotePitch(plugin,params);
-    return {reply,actual:snapshot(),starts,cancels,history:score.history,
+    let actual=null;
+    try {actual=snapshot();} catch(error) {} // A failed native read has no snapshot.
+    return {reply,actual,starts,cancels,history:score.history,
         first:first.notes.map(n=>n.pitch),cursor:[plugin.cursorMeasure,plugin.cursorVoice]};
 }
 """
@@ -257,3 +264,45 @@ def test_commit_exception_never_cancels_an_unknown_undo_scope() -> None:
     assert response["reply"]["mutation_status"] == "unknown"
     assert response["history"] == ["prior user change", "setNotePitch"]
     assert response["cancels"] == 0
+
+
+def test_known_commit_retains_applied_unverified_when_all_native_reads_fail() -> None:
+    response = _run(
+        "score.postCommit=()=>{Passage.describeEvent=()=>{"
+        "throw new Error('post-commit read unavailable');};};"
+    )
+    assert response["reply"]["code"] == "verification_failed"
+    assert response["reply"]["mutation_status"] == "applied_unverified"
+    assert response["reply"]["actual"] is None
+    assert response["history"] == ["prior user change", "setNotePitch"]
+    assert response["cancels"] == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "chord.notes[0].accidental={subtype:plugin.Accidental.SHARP_SLASH};",
+        "chord.notes[0].accidental={subtype:999};",
+        "chord.notes[0].accidental={};",
+        "delete chord.notes[0].accidentalType;",
+        "delete chord.notes[0].accidental;",
+        "delete plugin.Accidental;",
+    ],
+)
+def test_zero_tuning_microtonal_or_unknown_accidentals_reject_before_edit(
+    change: str,
+) -> None:
+    response = _run(change)
+    assert response["reply"]["code"] == "unsupported_target"
+    assert response["reply"]["mutation_status"] == "not_applied"
+    assert response["starts"] == 0 and response["cancels"] == 0
+    assert response["history"] == ["prior user change"]
+
+
+@pytest.mark.parametrize("accidental", ["FLAT", "NATURAL", "SHARP", "SHARP2", "FLAT2"])
+def test_conventional_accidentals_remain_eligible(accidental: str) -> None:
+    response = _run(
+        f"chord.notes[0].accidental={{subtype:plugin.Accidental.{accidental}}};"
+    )
+    assert response["reply"]["result"]["mutationStatus"] == "applied"
+    assert response["starts"] == 1

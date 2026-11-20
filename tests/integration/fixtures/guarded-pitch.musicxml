@@ -334,6 +334,37 @@
         <staff>2</staff>
       </note>
     </measure>
+    <measure number="5">
+      <note>
+        <pitch>
+          <step>C</step>
+          <alter>0.5</alter>
+          <octave>4</octave>
+        </pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <accidental>quarter-sharp</accidental>
+        <staff>1</staff>
+      </note>
+      <note>
+        <rest />
+        <duration>36</duration>
+        <voice>1</voice>
+        <type>half</type>
+        <dot />
+        <staff>1</staff>
+      </note>
+      <backup>
+        <duration>48</duration>
+      </backup>
+      <note>
+        <rest measure="yes" />
+        <duration>48</duration>
+        <voice>5</voice>
+        <staff>2</staff>
+      </note>
+    </measure>
   </part>
   <part id="P2">
     <measure number="1">
@@ -374,6 +405,12 @@
         <duration>16</duration>
       </note>
     </measure>
+    <measure number="5">
+      <note>
+        <rest measure="yes" />
+        <duration>16</duration>
+      </note>
+    </measure>
   </part>
   <part id="P3">
     <measure number="1">
@@ -409,6 +446,12 @@
       </note>
     </measure>
     <measure number="4">
+      <note>
+        <rest measure="yes" />
+        <duration>16</duration>
+      </note>
+    </measure>
+    <measure number="5">
       <note>
         <rest measure="yes" />
         <duration>16</duration>
@@ -462,6 +505,12 @@
         <duration>16</duration>
       </note>
     </measure>
+    <measure number="5">
+      <note>
+        <rest measure="yes" />
+        <duration>16</duration>
+      </note>
+    </measure>
   </part>
   <part id="P5">
     <measure number="1">
@@ -506,6 +555,12 @@
       </note>
     </measure>
     <measure number="4">
+      <note>
+        <rest measure="yes" />
+        <duration>16</duration>
+      </note>
+    </measure>
+    <measure number="5">
       <note>
         <rest measure="yes" />
         <duration>16</duration>

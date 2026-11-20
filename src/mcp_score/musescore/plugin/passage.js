@@ -17,7 +17,8 @@ var unsupportedNotation = [
     "effective instrument, clef, key and tempo context",
     "displayed measure numbering and persistent event identifiers",
     "measure-attached elements outside segments",
-    "system annotations without a staff assignment"
+    "system annotations without a staff assignment",
+    "microtonal accidental cent offsets and playback tuning"
 ];
 
 function integer(value) {

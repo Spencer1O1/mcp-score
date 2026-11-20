@@ -150,24 +150,32 @@ when a tone crosses a peer; indices are valid only for the supplied snapshot.
 Written octave remains unavailable in these results.
 
 Only ordinary pitched chords are supported. Chords containing ties, grace notes,
-tuplets, duplicate sounding tones, drum or tablature parts, microtonal tuning,
-or unavailable eligibility metadata are rejected before mutation. Edits creating
-a duplicate sounding chord tone are also rejected. Successful changes form one
+tuplets, duplicate sounding tones, drum or tablature parts, microtonal tuning
+or accidentals are rejected before mutation. Missing eligibility metadata also
+rejects the edit. Edits creating a duplicate sounding chord tone are rejected. Successful changes form one
 undo step; an unchanged pitch and spelling create no step.
+
+Accidental cents and explicit note tuning are separate native properties. The
+guard requires zero explicit tuning and a verified conventional accidental type;
+unknown or missing accidental metadata fails closed. The passage reader reports
+base MIDI/TPC values and lists unrepresented accidental cents and playback tuning
+in its unsupported metadata.
 
 Native state is checked before and after committing. Verification failure inside
 an open undo command cancels that command; `rolled_back` is reported only when a
 native re-read matches the original target. A failure detected after commit is
-reported as `applied_unverified` with actual snapshots, without blindly undoing
-an earlier action. Transport failures use the separate unknown-outcome handling
-below. Inspect the returned status before retrying or undoing.
+reported as `applied_unverified`, without blindly undoing an earlier action.
+That known committed status is retained even if a subsequent native read fails;
+an unavailable actual snapshot is returned as null. Transport failures use the
+separate unknown-outcome handling below. Inspect the returned status before retrying or undoing.
 
 The native property semantics and eligibility checks follow the supported API's
 [Note and DurationElement definitions](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/elements.h)
-and [undoable property setters](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/scoreelement.cpp).
+[undoable property setters](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/scoreelement.cpp),
+and [native accidental cent offsets](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/dom/accidental.cpp).
 Live integration fixtures exercise ordinary and reordered chords, stale/no-op
-requests, Bb and octave transposition, and unsupported tied, tuplet, and grace
-notes across the supported MuseScore matrix.
+requests, Bb and octave transposition, and unsupported tied, tuplet, grace,
+and quarter-tone notes across the supported MuseScore matrix.
 
 ## Protocol
 
