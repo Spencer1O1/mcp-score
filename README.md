@@ -1,6 +1,5 @@
-[![CI](https://github.com/tskovlund/mcp-score/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tskovlund/mcp-score/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/mcp-score-server.svg)](https://pypi.org/project/mcp-score-server/)
-[![Integration](https://github.com/tskovlund/mcp-score/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/tskovlund/mcp-score/actions/workflows/integration.yml)
+[![CI](https://github.com/Spencer1O1/mcp-score/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Spencer1O1/mcp-score/actions/workflows/ci.yml)
+[![Integration](https://github.com/Spencer1O1/mcp-score/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/Spencer1O1/mcp-score/actions/workflows/integration.yml)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -9,6 +8,13 @@
 Music notation for AI assistants. Describe a piece in plain language and get a MusicXML score; with MuseScore open, read and edit the live score by conversation.
 
 Works with any MCP client (Claude Code, Claude Desktop, LM Studio, and others). Status: alpha.
+
+This is the [Spencer1O1 fork](https://github.com/Spencer1O1/mcp-score) of
+[Thomas Skovlund Hansen's mcp-score](https://github.com/tskovlund/mcp-score).
+Install from this repository to get its live passage/selection reads and guarded
+edits. The distribution `mcp-score-server`, import `mcp_score`, and executable
+`mcp-score` keep their upstream names; a package-name-only PyPI install does not
+select this fork. See [fork provenance and installation](docs/fork-installation.md).
 
 ## Quick demo
 
@@ -38,19 +44,20 @@ The assistant reads the live score, applies musical judgement, and writes the ar
 
 ## Install
 
-Requires Python 3.14 or later.
+Requires Python 3.14 or later and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-pip install mcp-score-server
-# or
-uv tool install mcp-score-server
+git clone https://github.com/Spencer1O1/mcp-score.git
+cd mcp-score
+uv sync --locked --no-dev
+git rev-parse HEAD   # Record the fork commit installed on both hosts.
 ```
 
 Then:
 
 ```bash
-mcp-score install-plugin   # MuseScore plugin, for live editing
-mcp-score install-skill    # score-generate skill, for Claude Code
+uv run --no-sync mcp-score install-plugin   # On the MuseScore host, for live editing
+uv run --no-sync mcp-score install-skill    # Optional score-generate skill
 ```
 
 ## Connect your MCP client
@@ -58,18 +65,26 @@ mcp-score install-skill    # score-generate skill, for Claude Code
 Claude Code:
 
 ```bash
-claude mcp add mcp-score -- mcp-score serve
+claude mcp add mcp-score -- /absolute/path/to/mcp-score/.venv/bin/mcp-score serve
 ```
 
-Claude Desktop and other clients: run the command `mcp-score` with the argument `serve`, for example in `claude_desktop_config.json`:
+Claude Desktop and other clients: launch the fork environment's executable with
+the argument `serve`, for example in `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "mcp-score": { "command": "mcp-score", "args": ["serve"] }
+    "mcp-score": {
+      "command": "/absolute/path/to/mcp-score/.venv/bin/mcp-score",
+      "args": ["serve"]
+    }
   }
 }
 ```
+
+On Windows, use the absolute path to `.venv\Scripts\mcp-score.exe` instead.
+The [installation guide](docs/fork-installation.md) includes Windows JSON paths,
+pinned revisions, updates, and a MuseScore host separate from the MCP client.
 
 ## Use it with MuseScore
 
@@ -81,13 +96,14 @@ Details and troubleshooting: [MuseScore plugin](docs/musescore-plugin.md).
 
 ## Documentation
 
-| Document                                                    | Description                                    |
-| ----------------------------------------------------------- | ---------------------------------------------- |
-| [Getting started](docs/getting-started.md)                  | Set up mcp-score and generate your first score |
-| [Releases](https://github.com/tskovlund/mcp-score/releases) | What changed in each version                   |
-| [Tool reference](docs/reference.md)                         | All MCP tools and CLI commands                 |
-| [MuseScore plugin](docs/musescore-plugin.md)                | Plugin installation and WebSocket protocol     |
-| [Architecture](docs/architecture.md)                        | System design and key decisions                |
+| Document                                                              | Description                                    |
+| --------------------------------------------------------------------- | ---------------------------------------------- |
+| [Getting started](docs/getting-started.md)                            | Set up mcp-score and generate your first score |
+| [Fork history](https://github.com/Spencer1O1/mcp-score/commits/main/) | Changes delivered by this fork                 |
+| [Fork installation](docs/fork-installation.md)                        | Provenance, matching revisions, and updates    |
+| [Tool reference](docs/reference.md)                                   | All MCP tools and CLI commands                 |
+| [MuseScore plugin](docs/musescore-plugin.md)                          | Plugin installation and WebSocket protocol     |
+| [Architecture](docs/architecture.md)                                  | System design and key decisions                |
 
 ## Contributing
 

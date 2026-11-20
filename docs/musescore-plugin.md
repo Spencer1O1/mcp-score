@@ -16,10 +16,11 @@ Earlier versions are not supported: MuseScore 4.4 moved to Qt 6 and stopped ship
 
 ## Installation
 
-The easy way:
+First install [this fork's Python environment](fork-installation.md), then run
+from that checkout on the MuseScore host:
 
 ```bash
-mcp-score install-plugin
+uv run --no-sync mcp-score install-plugin
 ```
 
 Or copy the `src/mcp_score/musescore/plugin/` directory by hand to `~/Documents/MuseScore4/Plugins/mcp-score-bridge/` (and delete a `mcp-score-bridge.qml` file left by a release before 0.2, or MuseScore lists two bridges). MuseScore uses that directory on macOS, Linux and Windows (`%USERPROFILE%\Documents\MuseScore4\Plugins\` on Windows); if you changed it in MuseScore's preferences (Folders > Plugins), use your own path.
@@ -45,6 +46,10 @@ the plugin on the Windows machine and configure the client to launch the matchin
 Python server environment. The server connects to the MuseScore host using the
 `host` and `port` arguments to `connect_to_musescore`. This negotiation does not
 provide authentication or network access control.
+
+The [fork installation guide](fork-installation.md) includes matching-commit
+Windows setup, explicit client executable paths, and loopback SSH forwarding
+for separate hosts.
 
 ## Verifying the connection
 

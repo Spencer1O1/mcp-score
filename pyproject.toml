@@ -24,10 +24,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tskovlund/mcp-score"
-Repository = "https://github.com/tskovlund/mcp-score"
-Issues = "https://github.com/tskovlund/mcp-score/issues"
-Documentation = "https://github.com/tskovlund/mcp-score/tree/main/docs"
+Homepage = "https://github.com/Spencer1O1/mcp-score"
+Repository = "https://github.com/Spencer1O1/mcp-score"
+Issues = "https://github.com/Spencer1O1/mcp-score/issues"
+Documentation = "https://github.com/Spencer1O1/mcp-score/tree/main/docs"
+Upstream = "https://github.com/tskovlund/mcp-score"
 
 [project.scripts]
 mcp-score = "mcp_score.cli:main"

@@ -11,7 +11,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 ## Development setup
 
 ```bash
-git clone https://github.com/tskovlund/mcp-score.git
+git clone https://github.com/Spencer1O1/mcp-score.git
 cd mcp-score
 
 # Option A: devbox + direnv (recommended)
@@ -55,6 +55,13 @@ Markdown is formatted with Prettier; CI checks it, so run `npx prettier --write 
 the CLI parser; a test fails when it drifts. After changing a tool, run
 `uv run scripts/generate_reference.py` and commit the result. Tool docstrings
 are what MCP clients see, so write the reference there.
+
+The separate delivery check `uv run python scripts/smoke_wheel.py` builds and
+installs a wheel into a temporary environment, verifies bundled resources and
+tool schemas without source imports, and copies the plugin only into an explicit
+temporary directory. It may download build/runtime dependencies; offline pytest
+does not run it. CI has a dedicated wheel-smoke job. See
+[fork provenance and installation](docs/fork-installation.md).
 
 ## Code style
 
