@@ -24,6 +24,7 @@ import "passage.js" as Passage
 import "editing.js" as Editing
 import "selection.js" as Selection
 import "sequence.js" as Sequence
+import "protocol.js" as Protocol
 
 MuseScore {
     id: root
@@ -54,6 +55,7 @@ MuseScore {
     // Command name -> implementation. Every implementation takes the
     // plugin (for the cursor state and MuseScore's API) and the params.
     readonly property var commands: ({
+        "getCapabilities":      Protocol.getCapabilities,
         "ping":                 Reading.ping,
         "getScore":             Reading.getScore,
         "getCursorInfo":        Reading.getCursorInfo,

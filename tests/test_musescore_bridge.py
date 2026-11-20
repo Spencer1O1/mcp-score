@@ -8,6 +8,7 @@ become the result models, and how its refusals surface.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import partial
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
@@ -39,7 +40,12 @@ from mcp_score.bridge.results import (
     TimeSignatureSet,
     Transposed,
 )
-from tests.fakes import WEBSOCKETS_CONNECT, fake_connection, sent_payloads
+from tests.fakes import (
+    MUSESCORE_HANDSHAKE,
+    WEBSOCKETS_CONNECT,
+    fake_connection,
+    sent_payloads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -82,10 +88,11 @@ CURSOR = CursorInfo(
 
 async def _connected_bridge(*replies: Any) -> tuple[MuseScoreBridge, AsyncMock]:
     """A bridge connected to a mock plugin that answers with *replies*."""
-    connection = fake_connection(*replies)
+    connection = fake_connection(MUSESCORE_HANDSHAKE, *replies)
     bridge = MuseScoreBridge()
     with patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)):
         await bridge.connect()
+    connection.send.reset_mock()
     return bridge, connection
 
 
@@ -560,7 +567,7 @@ class TestMuseScorePassageReads:
         ]
 
     @pytest.mark.anyio()
-    async def test_old_plugin_rejection_is_not_replaced_by_partial_cursor_read(
+    async def test_plugin_rejection_is_not_replaced_by_partial_cursor_read(
         self,
     ) -> None:
         bridge, connection = await _connected_bridge(
@@ -573,6 +580,26 @@ class TestMuseScorePassageReads:
         assert [payload["command"] for payload in sent_payloads(connection)] == [
             "readPassage"
         ]
+
+    @pytest.mark.anyio()
+    async def test_missing_passage_capability_blocks_read_without_cursor_fallback(
+        self,
+    ) -> None:
+        handshake = deepcopy(MUSESCORE_HANDSHAKE)
+        handshake["result"]["commands"].remove("readPassage")
+        connection = fake_connection(handshake)
+        bridge = MuseScoreBridge()
+
+        with (
+            patch(WEBSOCKETS_CONNECT, AsyncMock(return_value=connection)),
+            pytest.raises(BridgeError, match="does not support command .*readPassage"),
+        ):
+            await bridge.read_passage(1, 1)
+
+        assert sent_payloads(connection) == [
+            {"command": "getCapabilities", "params": {"protocolVersion": 1}}
+        ]
+        assert "readPassage" not in bridge.diagnostics().commands
 
     @pytest.mark.anyio()
     async def test_malformed_event_is_a_protocol_error(self) -> None:

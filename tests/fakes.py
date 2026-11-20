@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from websockets.protocol import State
 
 from mcp_score.bridge import BridgeError, BridgeRegistry, CommandResult, ScoreBridge
+from mcp_score.bridge.musescore import MuseScoreCommand
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     BarlineSet,
@@ -43,6 +44,7 @@ from mcp_score.bridge.results import (
 from mcp_score.context import AppState, ScoreContext
 
 __all__ = [
+    "MUSESCORE_HANDSHAKE",
     "REMOTE_CONTROL_HANDSHAKE",
     "SESSION_TOKEN",
     "WEBSOCKETS_CONNECT",
@@ -69,6 +71,28 @@ def score_context(registry: BridgeRegistry) -> ScoreContext:
 
 WEBSOCKETS_CONNECT = "mcp_score.bridge.websocket.websockets.connect"
 """Patch target for the function every bridge opens its connection with."""
+
+MUSESCORE_HANDSHAKE: dict[str, Any] = {
+    "result": {
+        "protocolVersion": 1,
+        "pluginVersion": "0.2.0-test",
+        "commands": list(MuseScoreCommand),
+        "sequenceCommands": [
+            command
+            for command in MuseScoreCommand
+            if command
+            not in {
+                MuseScoreCommand.GET_CAPABILITIES,
+                MuseScoreCommand.GET_SCORE,
+                MuseScoreCommand.GET_CURSOR_INFO,
+                MuseScoreCommand.READ_PASSAGE,
+                MuseScoreCommand.UNDO,
+                MuseScoreCommand.PROCESS_SEQUENCE,
+            }
+        ],
+    }
+}
+"""Capabilities returned by the test plugin during connection negotiation."""
 
 _START = CursorPosition(measure=1, staff=0)
 _START_CURSOR = CursorInfo(measure=1, staff=0, voice=0, beat=1, tick=0, element=None)

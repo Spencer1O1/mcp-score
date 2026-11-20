@@ -20,18 +20,21 @@ Connect to a running MuseScore Studio (4.4.2 or later).
 
 The MCP Score Bridge plugin must be running in MuseScore with its
 window open. Connecting disconnects any other application.
+Negotiates the plugin protocol and returns supported commands and versions.
+Incompatible or legacy plugins must be reinstalled before connecting.
 
 | Parameter | Type  | Default       | Description                          |
 | --------- | ----- | ------------- | ------------------------------------ |
 | `host`    | `str` | `"localhost"` | WebSocket host (default: localhost). |
 | `port`    | `int` | `8765`        | WebSocket port (default: 8765).      |
 
-**Returns** `Connected`.
+**Returns** `MuseScoreConnected`.
 
-| Field         | Type  | Description |
-| ------------- | ----- | ----------- |
-| `application` | `str` |             |
-| `uri`         | `str` |             |
+| Field         | Type                   | Description |
+| ------------- | ---------------------- | ----------- |
+| `application` | `str`                  |             |
+| `uri`         | `str`                  |             |
+| `bridge`      | `MuseScoreDiagnostics` |             |
 
 ### `disconnect_from_musescore`
 
@@ -98,6 +101,25 @@ No parameters.
 | `measure_count`  | `int`                   |                                                                 |
 | `key_signature`  | `int \| None`           | Sharps (positive) or flats (negative) at the start, when known. |
 | `time_signature` | `TimeSignature \| None` | The time signature at the start, when known.                    |
+
+### `get_musescore_bridge_info`
+
+Get negotiated protocol, plugin/server versions and supported commands.
+
+Requires an active MuseScore connection. Does not read or modify the score.
+Command availability describes protocol operations, not notation coverage.
+
+No parameters.
+
+**Returns** `MuseScoreDiagnostics`: Negotiated plugin capabilities and the Python server's package version.
+
+| Field               | Type        | Description                                    |
+| ------------------- | ----------- | ---------------------------------------------- |
+| `protocol_version`  | `int`       |                                                |
+| `plugin_version`    | `str`       |                                                |
+| `commands`          | `list[str]` | Supported top-level protocol commands.         |
+| `sequence_commands` | `list[str]` | Commands accepted as steps of processSequence. |
+| `server_version`    | `str`       |                                                |
 
 ### `ping_score_app`
 
@@ -556,6 +578,18 @@ What sits at the cursor: a chord, a rest, a single note or something else.
 | `pitch`    | `int \| None`        | MIDI pitch of a single note.         |
 | `tpc`      | `int \| None`        | Tonal pitch class of a single note.  |
 | `name`     | `str \| None`        | Name of a single note.               |
+
+### `MuseScoreDiagnostics`
+
+Negotiated plugin capabilities and the Python server's package version.
+
+| Field               | Type        | Description                                    |
+| ------------------- | ----------- | ---------------------------------------------- |
+| `protocol_version`  | `int`       |                                                |
+| `plugin_version`    | `str`       |                                                |
+| `commands`          | `list[str]` | Supported top-level protocol commands.         |
+| `sequence_commands` | `list[str]` | Commands accepted as steps of processSequence. |
+| `server_version`    | `str`       |                                                |
 
 ### `Note`
 

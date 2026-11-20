@@ -114,6 +114,7 @@ class TestMuseScoreBridgeReadsFixture:
             before = await bridge.get_cursor_info()
 
             passage = await bridge.read_passage(1, 1)
+            diagnostics = bridge.diagnostics()
             after = await bridge.get_cursor_info()
 
         chords = [
@@ -129,6 +130,8 @@ class TestMuseScoreBridgeReadsFixture:
         ]
         assert all(event.duration == _QUARTER_NOTE for event in chords)
         assert all(event.actual_duration == _QUARTER_NOTE for event in chords)
+        assert "readPassage" in diagnostics.commands
+        assert "readPassage" not in diagnostics.sequence_commands
         assert passage.range_complete is True
         assert passage.unsupported
         assert passage.measures[0].actual_duration == Duration(
@@ -163,6 +166,27 @@ class TestMuseScoreBridgeReadsFixture:
 
         assert pitches(changed) == [pitch + 1 for pitch in pitches(before)]
         assert restored == before
+
+
+class TestMuseScoreBridgeCapabilities:
+    @pytest.mark.anyio()
+    async def test_negotiated_commands_match_live_plugin_dispatch(self) -> None:
+        async with _connected_bridge() as bridge:
+            assert await bridge.connect()
+            diagnostics = bridge.diagnostics()
+            assert diagnostics.plugin_version
+            assert diagnostics.protocol_version == 1
+            assert "getScore" in diagnostics.commands
+            assert "appendMeasures" in diagnostics.sequence_commands
+            assert "getScore" not in diagnostics.sequence_commands
+            assert await bridge.ping()
+
+    @pytest.mark.anyio()
+    async def test_plugin_rejects_incompatible_client_protocol(self) -> None:
+        async with _connected_bridge() as bridge:
+            with pytest.raises(BridgeError, match="Unsupported bridge protocol"):
+                await bridge.send_command("getCapabilities", {"protocolVersion": 2})
+            assert await bridge.ping()
 
 
 class TestMuseScoreBridgeModifiesScore:

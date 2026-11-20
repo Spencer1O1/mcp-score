@@ -9,12 +9,18 @@ module is the only place they are spelled out on the Python side.
 from __future__ import annotations
 
 from enum import StrEnum
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
 
 from mcp_score.bridge.base import BridgeError
+from mcp_score.bridge.capabilities import (
+    PROTOCOL_VERSION,
+    MuseScoreDiagnostics,
+    PluginCapabilities,
+)
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import (
     BarlineSet,
@@ -34,11 +40,12 @@ from mcp_score.bridge.results import (
     TimeSignatureSet,
     Transposed,
 )
-from mcp_score.bridge.websocket import DEFAULT_HOST, WebSocketBridge
+from mcp_score.bridge.websocket import DEFAULT_HOST, TransportError, WebSocketBridge
 
 if TYPE_CHECKING:
     from mcp_score.bridge.base import CommandResult
     from mcp_score.bridge.results import Duration
+    from mcp_score.bridge.websocket import WebSocketTransport
 
 __all__ = ["DEFAULT_PORT", "MuseScoreBridge", "MuseScoreCommand"]
 
@@ -46,12 +53,17 @@ DEFAULT_PORT = 8765
 """The port the plugin listens on."""
 
 APPLICATION_NAME = "MuseScore"
+PLUGIN_UPGRADE_HINT = (
+    "Run mcp-score install-plugin from the same environment as the MCP server "
+    "on the MuseScore host, then close and reopen the MCP Score Bridge plugin."
+)
 
 
 class MuseScoreCommand(StrEnum):
     """Commands the plugin understands."""
 
     PING = "ping"
+    GET_CAPABILITIES = "getCapabilities"
     GET_SCORE = "getScore"
     GET_CURSOR_INFO = "getCursorInfo"
     READ_PASSAGE = "readPassage"
@@ -78,6 +90,89 @@ class MuseScoreBridge(WebSocketBridge):
 
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         super().__init__(APPLICATION_NAME, host, port)
+        self._capabilities: PluginCapabilities | None = None
+
+    async def _on_connected(self, transport: WebSocketTransport) -> None:
+        self._capabilities = None
+        reply = await transport.request(
+            {
+                "command": MuseScoreCommand.GET_CAPABILITIES,
+                "params": {"protocolVersion": PROTOCOL_VERSION},
+            }
+        )
+        if "error" in reply:
+            raise TransportError(
+                f"MuseScore plugin capability negotiation failed: {reply['error']}. "
+                f"{PLUGIN_UPGRADE_HINT}"
+            )
+        try:
+            capabilities = PluginCapabilities.model_validate(
+                _snake_case_keys(reply.get("result"))
+            )
+        except ValidationError as error:
+            raise TransportError(
+                f"MuseScore plugin returned invalid capabilities: {error}. "
+                f"{PLUGIN_UPGRADE_HINT}"
+            ) from error
+        if capabilities.protocol_version != PROTOCOL_VERSION:
+            raise TransportError(
+                f"Incompatible MuseScore bridge protocol "
+                f"{capabilities.protocol_version}; server requires {PROTOCOL_VERSION}. "
+                f"{PLUGIN_UPGRADE_HINT}"
+            )
+        required_commands = {MuseScoreCommand.GET_CAPABILITIES, MuseScoreCommand.PING}
+        if not required_commands.issubset(capabilities.commands):
+            raise TransportError(
+                "MuseScore plugin is missing required handshake/health commands. "
+                f"{PLUGIN_UPGRADE_HINT}"
+            )
+        if not set(capabilities.sequence_commands).issubset(capabilities.commands):
+            raise TransportError(
+                "MuseScore plugin advertises sequence commands absent from its "
+                f"supported commands. {PLUGIN_UPGRADE_HINT}"
+            )
+        self._capabilities = capabilities
+
+    async def _on_disconnecting(self, transport: WebSocketTransport) -> None:
+        self._capabilities = None
+
+    def diagnostics(self) -> MuseScoreDiagnostics:
+        """The capabilities negotiated on the current live connection.
+
+        Raises:
+            BridgeError: When no negotiated connection is active.
+        """
+        if not self.is_connected or self._capabilities is None:
+            raise BridgeError("MuseScore has no active negotiated connection.")
+        return MuseScoreDiagnostics(
+            **self._capabilities.model_dump(),
+            server_version=version("mcp-score-server"),
+        )
+
+    def _validate_payload(self, payload: dict[str, Any]) -> None:
+        capabilities = self._capabilities
+        if capabilities is None:
+            raise BridgeError("MuseScore has no active negotiated connection.")
+        action = payload.get("command")
+        if action not in capabilities.commands:
+            raise BridgeError(
+                f"MuseScore plugin {capabilities.plugin_version} does not support "
+                f"command {action!r}. {PLUGIN_UPGRADE_HINT}"
+            )
+        if action == MuseScoreCommand.PROCESS_SEQUENCE:
+            params: object = payload.get("params", {})
+            if isinstance(params, dict):
+                sequence = cast("dict[str, object]", params).get("sequence")
+                if not isinstance(sequence, list):
+                    return
+                for index, step in enumerate(cast("list[object]", sequence)):
+                    if isinstance(step, dict):
+                        step_action = cast("dict[str, object]", step).get("action")
+                        if step_action not in capabilities.sequence_commands:
+                            raise BridgeError(
+                                f"MuseScore plugin does not support sequence step "
+                                f"{index}: {step_action!r}. {PLUGIN_UPGRADE_HINT}"
+                            )
 
     async def send_command(
         self, action: str, params: dict[str, Any] | None = None
