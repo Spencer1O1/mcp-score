@@ -115,7 +115,10 @@ are rejected. These checks protect against accidental use, not forged metadata.
 This mode intentionally changes the disposable account's native MuseScore
 preferences and data; it makes no per-process profile-preservation claim.
 
-The macOS account paths remain separate from the marked artifact root. Before
+The macOS account paths remain separate from the marked artifact root. Custom
+artifact roots that overlap native profile paths in either direction, including
+resolved symlink aliases and Library ancestors, are refused before adoption or
+cleanup even if a valid marker is present. Before
 each fixture launch, the exact native MuseScore `session` directory is atomically
 renamed into a unique backup inside that root. This prevents session recovery
 from overriding the fixture. Symlinked sources are refused; failed moves leave

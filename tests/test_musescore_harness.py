@@ -1039,3 +1039,70 @@ def test_runner_data_root_symlink_is_refused(tmp_path: Path) -> None:
         with pytest.raises(harness.HarnessError, match="symlinked"):
             harness.require_macos_runner(settings)
         assert target.is_dir()
+
+
+@pytest.mark.parametrize(
+    "location", ["data", "library", "preferences", "session", "symlink", "alias-parent"]
+)
+def test_native_mac_namespace_cannot_be_claimed_or_deleted(
+    tmp_path: Path, location: str
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        roots = {
+            "data": account.data_dir,
+            "library": account.home / "Library",
+            "preferences": account.preferences_file,
+            "session": account.data_dir / "session/child",
+            "symlink": account.home / "artifact-alias",
+            "alias-parent": account.home
+            / "library-alias/Application Support/MuseScore/MuseScore4",
+        }
+        root = roots[location]
+        if location == "alias-parent":
+            account.data_dir.mkdir(parents=True)
+            (account.home / "library-alias").symlink_to(
+                account.home / "Library", target_is_directory=True
+            )
+        elif location == "symlink":
+            account.data_dir.mkdir(parents=True)
+            root.symlink_to(account.data_dir, target_is_directory=True)
+        else:
+            root.mkdir(parents=True)
+        # Even a pre-existing valid marker cannot authorize adopting native data.
+        (root / harness.PROFILE_MARKER).write_text(harness.PROFILE_MARKER_CONTENT)
+        sentinel = root / "native-sentinel"
+        sentinel.write_text("untouched")
+        dangerous = replace(settings, layout=harness.layout_for("Darwin", root))
+        with pytest.raises(harness.HarnessError, match="overlaps"):
+            harness.require_macos_runner(dangerous)
+        for operation in (
+            lambda: harness.claim_profile(dangerous.layout),
+            lambda: harness.install(dangerous),
+            lambda: harness.start(dangerous, tmp_path / "score.musicxml"),
+            lambda: harness.stop(dangerous),
+            lambda: harness.clean(dangerous),
+        ):
+            with (
+                patch.object(harness, "stop_owned") as stop_owned,
+                pytest.raises(harness.HarnessError, match="overlaps"),
+            ):
+                operation()
+            stop_owned.assert_not_called()
+            assert sentinel.read_text() == "untouched"
+            assert (root / harness.PROFILE_MARKER).is_file()
+        with pytest.raises(harness.HarnessError, match="overlaps"):
+            harness.clean(replace(dangerous, macos_runner_mode=False))
+        assert sentinel.read_text() == "untouched"
+
+
+def test_mac_default_cache_artifact_root_is_disjoint_from_native_paths(
+    tmp_path: Path,
+) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        root = account.home / "work/mcp-score/.musescore/profile"
+        legitimate = replace(settings, layout=harness.layout_for("Darwin", root))
+        assert harness.require_macos_runner(legitimate) == account
+        harness.claim_profile(legitimate.layout)
+        harness.clean(legitimate)
+        assert not root.exists()
+        assert account.home.exists()

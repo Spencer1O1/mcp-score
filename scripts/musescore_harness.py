@@ -372,6 +372,7 @@ def require_macos_runner(settings: Settings) -> MacRunnerAccountPaths:
             "Natural runner profile paths are symlinked or escape "
             "the disposable account"
         )
+    validate_artifact_boundary(settings.layout)
     return MacRunnerAccountPaths(home, preferences, data)
 
 
@@ -387,6 +388,7 @@ def download(url: str, destination: Path) -> None:
 
 def install(settings: Settings) -> Path:
     """Make MuseScore available and return its executable."""
+    validate_artifact_boundary(settings.layout)
     executable = settings.executable
     if executable.exists():
         logger.info("MuseScore Studio %s already installed", settings.version)
@@ -518,12 +520,34 @@ def child_environment(settings: Settings) -> dict[str, str]:
     return environment
 
 
+def validate_artifact_boundary(layout: Layout) -> None:
+    """Refuse adoption/removal of native account namespaces, even with a marker."""
+    root = layout.root.resolve()
+    home = Path.home().resolve()
+    if home.is_relative_to(root):
+        raise HarnessError("A home directory or its ancestor cannot be a test profile")
+    if layout.system == "Darwin":
+        native_paths = (
+            home / "Library/Application Support/MuseScore/MuseScore4",
+            home / "Library/Preferences" / f"{MACOS_PREFERENCES_DOMAIN}.plist",
+            home / "Documents/MuseScore4",
+        )
+        for native in native_paths:
+            # Resolve aliases before comparing both directions. Native session
+            # descendants and Library ancestors must never become owned roots.
+            native = native.resolve()
+            if root.is_relative_to(native) or native.is_relative_to(root):
+                raise HarnessError(
+                    "Owned artifact root overlaps the native macOS profile: "
+                    f"{layout.root}"
+                )
+
+
 def claim_profile(layout: Layout) -> None:
     """Reserve a new private directory, refusing to adopt existing user data."""
+    validate_artifact_boundary(layout)
     root = layout.root
     marker = root / PROFILE_MARKER
-    if Path.home().resolve().is_relative_to(root.resolve()):
-        raise HarnessError("A home directory or its ancestor cannot be a test profile")
     if root.is_symlink():
         raise HarnessError("The test profile must not be a symlink")
     for path in (
@@ -1195,6 +1219,7 @@ def stop_owned(layout: Layout) -> None:
 
 def stop(settings: Settings) -> None:
     """Stop identity-verified owned PIDs only, retaining private logs/profile."""
+    validate_artifact_boundary(settings.layout)
     if not settings.layout.root.exists():
         return
     marker = settings.layout.root / PROFILE_MARKER
@@ -1206,6 +1231,7 @@ def stop(settings: Settings) -> None:
 
 
 def collect_logs(settings: Settings, destination: Path) -> None:
+    validate_artifact_boundary(settings.layout)
     destination.mkdir(parents=True, exist_ok=True)
     paths = [
         settings.layout.log_dir,
@@ -1225,6 +1251,7 @@ def collect_logs(settings: Settings, destination: Path) -> None:
 
 def clean(settings: Settings) -> None:
     """Remove only a marked private profile, after stopping its owned PIDs."""
+    validate_artifact_boundary(settings.layout)
     if not settings.layout.root.exists():
         return
     marker = settings.layout.root / PROFILE_MARKER
