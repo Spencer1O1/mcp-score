@@ -17,7 +17,14 @@ from mcp_score.bridge.pitch import (  # noqa: TC001
 )
 from mcp_score.bridge.results import Result
 
-__all__ = ["DurationEdit", "DurationEditRequest", "ExpectedDurationEvent"]
+__all__ = [
+    "DurationEdit",
+    "DurationEditRequest",
+    "DurationPolicy",
+    "ExpectedDurationEvent",
+]
+
+DurationPolicy = Literal["shorten_fill_rest", "extend_into_rests"]
 
 
 class ExpectedDurationEvent(Result):
@@ -43,7 +50,7 @@ class DurationEditRequest(Result):
     voice: StrictInt = Field(ge=0, le=3)
     offset: WholeNoteFraction
     duration: WholeNoteFraction
-    policy: Literal["shorten_fill_rest"]
+    policy: DurationPolicy = "shorten_fill_rest"
     expected: list[ExpectedDurationEvent] = Field(min_length=1)
 
 

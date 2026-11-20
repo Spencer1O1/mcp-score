@@ -77,6 +77,7 @@ MuseScore {
         "setNotePitch":         Pitch.setNotePitch,
         "setNotePitches":       PitchBatch.setNotePitches,
         "setEventDuration":     DurationEdit.setEventDuration,
+        "extendEventDuration":  DurationEdit.extendEventDuration,
         "addRehearsalMark":     Editing.addRehearsalMark,
         "setBarline":           Editing.setBarline,
         "setKeySignature":      Editing.setKeySignature,

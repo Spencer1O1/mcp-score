@@ -17,6 +17,7 @@ from pydantic import StrictInt, ValidationError
 from mcp_score.bridge.duration_edit import (
     DurationEdit,
     DurationEditRequest,
+    DurationPolicy,
     ExpectedDurationEvent,
 )
 from mcp_score.bridge.pitch import (
@@ -106,13 +107,17 @@ async def set_live_event_duration(
     offset: WholeNoteFraction,
     duration: WholeNoteFraction,
     expected: list[ExpectedDurationEvent],
+    policy: DurationPolicy = "shorten_fill_rest",
 ) -> DurationEdit:
-    """Shorten an ordinary live chord and fill its released time with rests.
+    """Change an ordinary live chord's duration under an explicit rest policy.
 
     Pass ALL events from a fresh get_measure_content read filtered to the explicit staff
     and voice as expected. This complete voice-measure snapshot is checked inside
-    the synchronous native handler before any mutation. The only policy is
-    shorten_fill_rest: no extension or bar crossing. Only undotted whole through
+    the synchronous native handler before any mutation. Default shorten_fill_rest
+    shortens and fills released time. Explicit extend_into_rests lengthens only
+    through complete contiguous plain rests in the same voice and bar, ending
+    exactly at a rest boundary. Notes, gaps, partial rests, attached/hidden/cross-staff
+    rests and unknown eligibility reject before mutation. Only undotted whole through
     32nd durations are accepted. MuseScore 4.7+ (major version 4) is required for
     native duration rewriting and spanner inspection; older versions reject.
 
@@ -124,14 +129,18 @@ async def set_live_event_duration(
     requests create none. Selection/layout may change; logical cursor is untouched.
     This snapshot does not identify a score instance or global revision and cannot
     detect switching to identical contents. Not available with Dorico.
+    Extension requires the separately advertised extendEventDuration command;
+    an older shortening-only plugin rejects before send. Neither duration policy
+    supports mutation receipts or sequence execution; transport loss is not replayed.
 
     Args:
         measure: Ordinal measure (1-indexed).
         staff: Explicit staff index (0-indexed).
         voice: Explicit voice index (0-3).
         offset: Exact chord onset within the measure, in whole notes.
-        duration: New shorter or equal undotted binary whole-note duration.
+        duration: New undotted binary whole-note duration, consistent with policy.
         expected: Complete fresh target voice measure events, including annotations.
+        policy: shorten_fill_rest (default) or explicit extend_into_rests.
     """
     bridge = require_bridge(context)
     try:
@@ -142,7 +151,7 @@ async def set_live_event_duration(
                 "voice": voice,
                 "offset": offset.model_dump(),
                 "duration": duration.model_dump(),
-                "policy": "shorten_fill_rest",
+                "policy": policy,
                 "expected": [event.model_dump() for event in expected],
             }
         )
@@ -155,6 +164,7 @@ async def set_live_event_duration(
         request.offset,
         request.duration,
         request.expected,
+        request.policy,
     )
 
 

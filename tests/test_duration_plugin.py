@@ -81,7 +81,7 @@ function run(){const reply=Duration.setEventDuration(plugin,params);
 """
 
 
-def _run(change: str = "") -> Any:
+def _run(change: str = "", *, graph: str = _GRAPH) -> Any:
     sources = {}
     for name in ["Constants", "Score", "Passage", "Pitch", "Duration"]:
         sources[name] = "\n".join(
@@ -89,7 +89,7 @@ def _run(change: str = "") -> Any:
             for line in (_PLUGIN / f"{name.lower()}.js").read_text().splitlines()
             if not line.startswith(".")
         )
-    script = "const sources=" + json.dumps(sources) + ";" + _GRAPH + change
+    script = "const sources=" + json.dumps(sources) + ";" + graph + change
     script += "\nconsole.log(JSON.stringify(run()));"
     process = subprocess.run(
         [_NODE or "node", "-e", script], capture_output=True, text=True, check=True

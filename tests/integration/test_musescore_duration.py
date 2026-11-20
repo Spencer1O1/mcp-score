@@ -198,3 +198,194 @@ async def test_live_intersecting_slur_rejects_without_mutation() -> None:
         assert await bridge.read_passage(3, 3, 4, 0) == before
     finally:
         await bridge.disconnect()
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize(("staff", "voice"), [(0, 0), (0, 1), (4, 0), (5, 0)])
+async def test_native_extension_consumes_only_complete_rests_then_single_undo(
+    staff: int, voice: int
+) -> None:
+    bridge = MuseScoreBridge()
+    applied = False
+    try:
+        before = await bridge.read_passage(4, 4)
+        cursor_before = await bridge.get_cursor_info()
+        events = before.measures[0].events
+        snapshot = [
+            ExpectedDurationEvent.model_validate(event.model_dump())
+            for event in events
+            if event.staff == staff and event.voice == voice
+        ]
+        target = next(event for event in snapshot if event.kind == "chord")
+        desired = Duration(numerator=1, denominator=1 if voice == 1 else 2)
+        assert target.actual_duration is not None
+        onset = target.tick
+        old_end = (
+            onset
+            + Fraction(
+                target.actual_duration.numerator, target.actual_duration.denominator
+            )
+            * 1920
+        )
+        new_end = onset + Fraction(desired.numerator, desired.denominator) * 1920
+        consumed = [event for event in snapshot if old_end <= event.tick < new_end]
+        assert consumed and all(event.kind == "rest" for event in consumed)
+        if voice == 1:
+            assert len(consumed) == 2
+        release = tuple(map(int, os.environ["MUSESCORE_VERSION"].split(".")))
+        if release < (4, 7):
+            with pytest.raises(BridgeError) as rejected:
+                await bridge.set_event_duration(
+                    4,
+                    staff,
+                    voice,
+                    target.offset,
+                    desired,
+                    snapshot,
+                    "extend_into_rests",
+                )
+            assert rejected.value.details["code"] == "unsupported_native_api"
+            assert rejected.value.details["mutation_status"] == "not_applied"
+        else:
+            result = await bridge.set_event_duration(
+                4, staff, voice, target.offset, desired, snapshot, "extend_into_rests"
+            )
+            applied = result.mutation_status == "applied"
+            assert applied and result.verified
+            actual = await bridge.read_passage(4, 4)
+            assert result.before == events and result.after == actual.measures[0].events
+            changed = next(
+                event
+                for event in result.after
+                if event.staff == staff
+                and event.voice == voice
+                and event.tick == onset
+                and event.kind == "chord"
+            )
+            assert changed.duration == changed.actual_duration == desired
+            assert [note.model_dump() for note in changed.notes] == [
+                note.model_dump() for note in target.notes
+            ]
+            assert not [
+                event
+                for event in result.after
+                if event.staff == staff
+                and event.voice == voice
+                and old_end <= event.tick < new_end
+            ]
+            preserved = [
+                event
+                for event in events
+                if not (
+                    event.staff == staff
+                    and event.voice == voice
+                    and onset <= event.tick < new_end
+                    and event.kind != "other"
+                )
+            ]
+            assert all(event in result.after for event in preserved)
+            fresh = [
+                ExpectedDurationEvent.model_validate(event.model_dump())
+                for event in result.after
+                if event.staff == staff and event.voice == voice
+            ]
+            noop = await bridge.set_event_duration(
+                4, staff, voice, target.offset, desired, fresh, "extend_into_rests"
+            )
+            assert noop.mutation_status == "unchanged"
+            assert noop.selection_status == "unchanged"
+            assert "extendEventDuration" in bridge.diagnostics().commands
+            assert "extendEventDuration" not in bridge.diagnostics().sequence_commands
+        cursor_after = await bridge.get_cursor_info()
+        assert cursor_after == cursor_before
+    finally:
+        try:
+            if applied:
+                applied = False
+                await bridge.undo()
+            restored = await bridge.read_passage(4, 4)
+        finally:
+            await bridge.disconnect()
+    assert restored == before
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize(
+    ("measure", "staff", "voice", "duration", "reason"),
+    [
+        (5, 0, 0, Duration(numerator=1, denominator=2), "partial rest"),
+        (5, 0, 1, Duration(numerator=1, denominator=2), "following note"),
+        (5, 2, 0, Duration(numerator=1, denominator=2), "fermata rest"),
+        (5, 3, 0, Duration(numerator=1, denominator=2), "hidden rest"),
+        (6, 0, 0, Duration(numerator=1, denominator=2), "bar crossing"),
+        (7, 0, 0, Duration(numerator=1, denominator=1), "tuplet rests"),
+    ],
+)
+async def test_native_unsafe_extension_refuses_without_partial_mutation(
+    measure: int, staff: int, voice: int, duration: Duration, reason: str
+) -> None:
+    bridge = MuseScoreBridge()
+    try:
+        before = await bridge.read_passage(measure, measure)
+        events = before.measures[0].events
+        snapshot = [
+            ExpectedDurationEvent.model_validate(event.model_dump())
+            for event in events
+            if event.staff == staff and event.voice == voice
+        ]
+        target = next(event for event in snapshot if event.kind == "chord")
+        assert target.actual_duration is not None
+        old_end = (
+            target.tick
+            + Fraction(
+                target.actual_duration.numerator, target.actual_duration.denominator
+            )
+            * 1920
+        )
+        new_end = (
+            target.tick + Fraction(duration.numerator, duration.denominator) * 1920
+        )
+        if reason == "partial rest":
+            # Prove that import retained this notation, rather than silently
+            # decomposing it into an already-supported exact boundary.
+            assert any(
+                event.kind == "rest"
+                and event.tick == old_end
+                and event.actual_duration is not None
+                and event.tick
+                + Fraction(
+                    event.actual_duration.numerator, event.actual_duration.denominator
+                )
+                * 1920
+                > new_end
+                for event in snapshot
+            )
+        if reason == "following note":
+            assert any(
+                event.kind == "chord" and old_end <= event.tick < new_end
+                for event in snapshot
+            )
+        if reason == "tuplet rests":
+            assert any(
+                event.kind == "rest" and event.duration != event.actual_duration
+                for event in snapshot
+            )
+        with pytest.raises(BridgeError) as rejected:
+            await bridge.set_event_duration(
+                measure,
+                staff,
+                voice,
+                target.offset,
+                duration,
+                snapshot,
+                "extend_into_rests",
+            )
+        assert rejected.value.details["mutation_status"] == "not_applied", reason
+        assert rejected.value.details["code"] in {
+            "unsupported_native_api",
+            "unsupported_rest_coverage",
+            "unsupported_target",
+        }, reason
+        assert await bridge.read_passage(measure, measure) == before, reason
+    finally:
+        await bridge.disconnect()
