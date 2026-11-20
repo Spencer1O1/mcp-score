@@ -242,7 +242,8 @@ revision token, or guarantee that the address remains valid for an edit.
 
 Get properties of the current selection in the connected application.
 
-MuseScore reports the cursor position (measure, beat, staff, element).
+MuseScore reports its bridge logical cursor (not the actual UI selection);
+use read_current_selection for selected native elements and contents.
 Dorico reports the names, types and values of every property of the
 selected items, which is the closest its API gets to reading the score.
 
@@ -250,7 +251,7 @@ No parameters.
 
 **Returns** `SelectionProperties`: What the application reports about the current selection.
 
-MuseScore reports the cursor position; Dorico reports the properties
+MuseScore reports the bridge logical cursor; Dorico reports the properties
 of the selected items as they come from its API.
 
 | Field        | Type                       | Description |
@@ -258,6 +259,38 @@ of the selected items as they come from its API.
 | `cursor`     | `CursorInfo \| None`       |             |
 | `properties` | `ApplicationReply \| None` |             |
 | `warning`    | `str \| None`              |             |
+
+### `read_current_selection`
+
+Read the actual MuseScore UI selection, including unsaved selected contents.
+
+Returns an empty, distinct-element, or range selection from the native list.
+Range bounds are half-open; a null end tick means score end. The native
+list respects current selection filters; filter settings themselves are
+unavailable. It is never expanded to all events inside the bounding range.
+Selected notes are distinct from whole chords: event_context contains the
+owner chord, but only note/note_index identify the selected tone. Indices
+belong only to this snapshot. Ordinary segment-bound notes/chords/rests
+reuse passage contents, including available lyrics/articulations. Other
+types are opaque descriptors and may lack content or exact positions;
+grace-note positions and persistent identities are unsupported.
+Does not navigate, select, export, or create undo commands. The bridge's
+logical cursor is independent of this actual UI selection. Not Dorico.
+
+No parameters.
+
+**Returns** `CurrentSelection`: A single synchronous read of the actual native GUI selection.
+
+| Field               | Type                          | Description                                                                |
+| ------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `source`            | `str`                         |                                                                            |
+| `kind`              | `"none" \| "list" \| "range"` |                                                                            |
+| `range`             | `SelectionRange \| None`      |                                                                            |
+| `elements`          | `list[SelectionItem]`         |                                                                            |
+| `elements_complete` | `bool`                        | Every native selected-list entry was returned; not full notation fidelity. |
+| `observed_voices`   | `list[int]`                   | Voices encountered in selected tracks, not the configured voice filter.    |
+| `filter_state`      | `str`                         |                                                                            |
+| `unsupported`       | `list[str]`                   |                                                                            |
 
 ## Manipulation tools
 
@@ -864,6 +897,33 @@ A chord tone, with concert pitch spelling independent of display mode.
 | `name`          | `str`         | Concert spelling and octave, for example C#4 or Db4.                  |
 | `written_tpc`   | `int \| None` | Written TPC (tpc2), without octave; null on older plugins.            |
 | `displayed_tpc` | `int`         | TPC in the current concert/transposed display mode; not a MIDI pitch. |
+
+### `SelectionItem`
+
+One native selected element; a note does not select all its chord peers.
+
+| Field           | Type                                     | Description                                                             |
+| --------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| `kind`          | `"note" \| "chord" \| "rest" \| "other"` |                                                                         |
+| `type`          | `int`                                    | Native element type code.                                               |
+| `name`          | `str \| None`                            | Native localized element name, where exposed.                           |
+| `text`          | `str \| None`                            |                                                                         |
+| `track`         | `int \| None`                            | Native track; null when no staff/voice assignment is exposed.           |
+| `measure`       | `int \| None`                            | Ordinal measure of the resolved segment, or null when unresolved.       |
+| `event_context` | `PassageEvent \| None`                   | Owner chord for a note; selected chord/rest/other event otherwise.      |
+| `note_index`    | `int \| None`                            | Selected tone's index in event_context.notes, scoped to this read only. |
+| `note`          | `PassageNote \| None`                    | Only the selected tone; null for whole chords/rests/opaque elements.    |
+
+### `SelectionRange`
+
+Native half-open range bounds; these do not describe selection filters.
+
+| Field                 | Type          | Description                                                               |
+| --------------------- | ------------- | ------------------------------------------------------------------------- |
+| `start_tick`          | `int`         |                                                                           |
+| `end_tick`            | `int \| None` | Exclusive end tick; null means the native range extends to score end.     |
+| `start_staff`         | `int`         |                                                                           |
+| `end_staff_exclusive` | `int`         | Exclusive staff boundary, matching native staffEnd/selectRange semantics. |
 
 ### `TimeSignature`
 

@@ -83,6 +83,8 @@ jobs:
         run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
+        env:
+          MUSESCORE_SELECTION_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
@@ -90,7 +92,8 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py -v
+          MCP_SCORE_SELECTION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
 
       - name: Start guarded pitch fixture
         run: |
@@ -178,6 +181,8 @@ jobs:
         run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
+        env:
+          MUSESCORE_SELECTION_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
@@ -185,7 +190,8 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py -v
+          MCP_SCORE_SELECTION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
 
       - name: Start guarded pitch fixture
         run: |
@@ -275,6 +281,8 @@ jobs:
         run: uv run pytest tests/integration/test_musescore_bridge.py tests/integration/test_musescore_dispatch.py -v
 
       - name: Start multi-staff passage fixture
+        env:
+          MUSESCORE_SELECTION_TEST_SETUP: "1"
         run: |
           uv run scripts/musescore_harness.py stop
           uv run scripts/musescore_harness.py start tests/integration/fixtures/live-passage.musicxml
@@ -282,7 +290,8 @@ jobs:
       - name: Multi-staff passage tests (live plugin)
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_passage.py -v
+          MCP_SCORE_SELECTION_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_passage.py tests/integration/test_musescore_selection.py -v
 
       - name: Start guarded pitch fixture
         run: |

@@ -140,6 +140,18 @@ cleanup unlinks those assets without following targets. Log collection skips
 all symlink roots and descendants. The profile and desktop must use English
 menu labels.
 
+The passage-fixture CI phase also exercises native UI selection reads. Only
+that startup step opts into `MUSESCORE_SELECTION_TEST_SETUP=1`, which adds a fixed
+selection setup driver to the installed plugin **copy** under the marked owned
+profile. It can clear or select fixture notes/ranges and observe native state;
+it cannot evaluate code. The source/package plugin never includes its dispatch
+command, and the next startup reinstalls the production plugin. Missing or
+ambiguous insertion points and linked/unowned destinations are refused. The
+normal bridge phase verifies that the driver is absent. Native dirty/viewport
+and undo-stack inspection are not exposed by the supported wrappers; selection
+preservation is checked directly and undo preservation through a disposable
+edit/read/undo round trip.
+
 `stop` retains the marked artifacts and logs for inspection. Collect them before
 removing the profile:
 

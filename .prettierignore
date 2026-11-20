@@ -1,2 +1,3 @@
 # QML JavaScript resources: the .pragma and .import directives are not JavaScript.
 src/mcp_score/musescore/plugin/*.js
+tests/integration/plugin/selection-fixture.js

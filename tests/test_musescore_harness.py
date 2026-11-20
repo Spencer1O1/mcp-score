@@ -1302,3 +1302,67 @@ def test_hosted_native_log_collection_skips_linked_logs_root(tmp_path: Path) -> 
         harness.collect_logs(settings, destination)
         assert not (destination / "logs").exists()
         assert sentinel.read_text() == "private"
+
+
+class TestSelectionFixtureDriver:
+    def test_installed_copy_only_and_next_seed_restores_production(
+        self, tmp_path: Path
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        source = (
+            _HARNESS_PATH.parent.parent
+            / "src/mcp_score/musescore/plugin"
+            / PLUGIN_QML_NAME
+        )
+        original = source.read_bytes()
+        target = layout.plugins_dir / PLUGIN_DIRECTORY_NAME / PLUGIN_QML_NAME
+        harness._install_selection_fixture(layout)
+        assert source.read_bytes() == original
+        assert '"_testSelectionSetup": SelectionFixture.setup' in target.read_text()
+        assert (target.parent / "selection-fixture.js").is_file()
+        assert "_testSelectionSetup" not in source.read_text()
+        assert not (source.parent / "selection-fixture.js").exists()
+        harness.seed_configuration(layout)
+        assert target.read_bytes() == original
+        assert not (target.parent / "selection-fixture.js").exists()
+
+    @pytest.mark.parametrize("duplicate", [False, True])
+    def test_ambiguous_or_missing_sentinel_refuses_before_writes(
+        self,
+        tmp_path: Path,
+        duplicate: bool,
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.claim_profile(layout)
+        harness.seed_configuration(layout)
+        target = layout.plugins_dir / PLUGIN_DIRECTORY_NAME / PLUGIN_QML_NAME
+        sentinel = 'import "current-selection.js" as CurrentSelection'
+        malformed = target.read_text().replace(
+            sentinel, sentinel * 2 if duplicate else ""
+        )
+        target.write_text(malformed)
+        with pytest.raises(harness.HarnessError, match="sentinel"):
+            harness._install_selection_fixture(layout)
+        assert target.read_text() == malformed
+        assert not (target.parent / "selection-fixture.js").exists()
+
+    def test_unowned_profile_and_linked_destination_refused(
+        self, tmp_path: Path
+    ) -> None:
+        layout = harness.layout_for("Linux", tmp_path / "owned")
+        harness.seed_configuration(layout)
+        with pytest.raises(harness.HarnessError, match="marked owned"):
+            harness._install_selection_fixture(layout)
+        # An owned marker does not authorize following a destination link.
+        (layout.root / harness.PROFILE_MARKER).write_text(
+            harness.PROFILE_MARKER_CONTENT
+        )
+        target = layout.plugins_dir / PLUGIN_DIRECTORY_NAME / "selection-fixture.js"
+        outside = tmp_path / "outside.js"
+        outside.write_text("untouched")
+        target.symlink_to(outside)
+        with pytest.raises(harness.HarnessError, match="linked"):
+            harness._install_selection_fixture(layout)
+        assert outside.read_text() == "untouched"

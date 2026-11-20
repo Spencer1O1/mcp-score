@@ -69,6 +69,55 @@ echo '{"command": "ping"}' | websocat ws://localhost:8765
 # Expected response: {"result":"pong"}
 ```
 
+## Reading the actual UI selection
+
+`read_current_selection` reads `curScore.selection` directly, independently of
+the bridge's logical cursor. It reports `kind: none`, `list`, or `range`, plus
+every entry in the native selected-element list. An empty range remains a range,
+even when filters leave its selected list empty. It does not navigate, select,
+export, use the clipboard, or open an undo command.
+
+Each selected ordinary note has its own `note` and snapshot-local `note_index`.
+Its `event_context` includes the parent chord for rhythm and notation context;
+the other chord tones are **not** thereby reported as selected. Whole native
+chord and rest entries are distinguished from individual note entries. These
+contents reuse the live passage serializer, including available lyric and
+articulation metadata. Resolved entries include an ordinal measure, native tick,
+staff/voice, and exact whole-note offset inside `event_context`.
+
+Other selected types are opaque descriptors with native type, name, track and
+text where exposed. Some have segment positions; others, including page/measure
+attachments and spanners, can have `null` position/content fields. Grace notes
+are not assigned the main chord's onset. `elements_complete` means every native
+list entry was returned, not that every notation type was decoded. There are no
+persistent selection/event IDs or edit preconditions.
+
+Range tick and staff bounds are half-open. `end_tick: null` means a native range
+ending at score end. `end_staff_exclusive` forwards the native `staffEnd()`
+boundary; the wrapper's historical comment calls it inclusive, but native
+`selectRange` and traversal use an exclusive end. Range contents come solely
+from the native selected list, which applies selection and voice filters; the
+reader never fills the bounding rectangle with unselected elements.
+`filter_state: not_exposed` means the configured filters cannot be read from
+these wrappers. `observed_voices` lists voices found in selected tracks, not a
+voice filter or a promise that every voice in the range was selected.
+
+The native routes were checked in versioned `src/engraving/api/v1/selection.h`
+and `selection.cpp` for
+[MuseScore 4.4.4](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/selection.h),
+[4.6.2](https://github.com/musescore/MuseScore/blob/v4.6.2/src/engraving/api/v1/selection.h),
+and [4.7.5](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/selection.h).
+The filtered-list behavior and exclusive staff boundary follow native
+[`Selection::updateSelectedElements`](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/dom/select.cpp).
+These wrappers do not expose dirty-state, viewport, undo-stack or selection-filter
+inspection. The read uses native getters only. Oversize element lists or measure
+scans fail without a partial result.
+
+The legacy `get_selection_properties` tool continues returning the MuseScore
+bridge's logical cursor; use `read_current_selection` for actual UI contents.
+Dorico does not implement this native selection read. Older bridge plugins fail
+with an upgrade instruction instead of substituting the logical cursor.
+
 ## Reading live passages
 
 `read_passage` and `get_measure_content` return every rhythmic event in the
@@ -288,13 +337,14 @@ verified mutation results.
 
 ### Score information
 
-| Command           | Params                                       | Description                                                                                     |
-| ----------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `ping`            | none                                         | Health check. Returns `"pong"`.                                                                 |
-| `getCapabilities` | `{protocolVersion: int}`                     | Negotiate the protocol and report plugin version and supported top-level and sequence commands. |
-| `getScore`        | none                                         | Score metadata: title, parts, measure count, key/time signatures.                               |
-| `getCursorInfo`   | none                                         | Current cursor position: measure, staff, beat, element info.                                    |
-| `readPassage`     | `{startMeasure, endMeasure, staff?, voice?}` | Read all live events in an inclusive measure range without navigating or selecting.             |
+| Command                | Params                                       | Description                                                                                                   |
+| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ping`                 | none                                         | Health check. Returns `"pong"`.                                                                               |
+| `getCapabilities`      | `{protocolVersion: int}`                     | Negotiate the protocol and report plugin version and supported top-level and sequence commands.               |
+| `getScore`             | none                                         | Score metadata: title, parts, measure count, key/time signatures.                                             |
+| `getCursorInfo`        | none                                         | Current cursor position: measure, staff, beat, element info.                                                  |
+| `readPassage`          | `{startMeasure, endMeasure, staff?, voice?}` | Read all live events in an inclusive measure range without navigating or selecting.                           |
+| `readCurrentSelection` | `{}`                                         | Read the actual native selected-element list, range bounds and supported contents without changing selection. |
 
 ### Guarded mutation
 

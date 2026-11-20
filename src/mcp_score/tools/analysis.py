@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import StrictInt, ValidationError
 
+from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.event_address import EventAddress, LocatedEvent, locate_event
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.results import SelectionProperties
@@ -141,10 +142,31 @@ async def get_event_at_position(
 
 
 @score_tool
+async def read_current_selection(context: ScoreContext) -> CurrentSelection:
+    """Read the actual MuseScore UI selection, including unsaved selected contents.
+
+    Returns an empty, distinct-element, or range selection from the native list.
+    Range bounds are half-open; a null end tick means score end. The native
+    list respects current selection filters; filter settings themselves are
+    unavailable. It is never expanded to all events inside the bounding range.
+    Selected notes are distinct from whole chords: event_context contains the
+    owner chord, but only note/note_index identify the selected tone. Indices
+    belong only to this snapshot. Ordinary segment-bound notes/chords/rests
+    reuse passage contents, including available lyrics/articulations. Other
+    types are opaque descriptors and may lack content or exact positions;
+    grace-note positions and persistent identities are unsupported.
+    Does not navigate, select, export, or create undo commands. The bridge's
+    logical cursor is independent of this actual UI selection. Not Dorico.
+    """
+    return await require_bridge(context).read_current_selection()
+
+
+@score_tool
 async def get_selection_properties(context: ScoreContext) -> SelectionProperties:
     """Get properties of the current selection in the connected application.
 
-    MuseScore reports the cursor position (measure, beat, staff, element).
+    MuseScore reports its bridge logical cursor (not the actual UI selection);
+    use read_current_selection for selected native elements and contents.
     Dorico reports the names, types and values of every property of the
     selected items, which is the closest its API gets to reading the score.
     """
@@ -159,5 +181,6 @@ def register(server: MCPServer) -> None:
         get_measure_content,
         get_event_at_position,
         get_selection_properties,
+        read_current_selection,
     ):
         server.tool()(tool)
