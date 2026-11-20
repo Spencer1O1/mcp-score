@@ -115,13 +115,29 @@ async def test_native_shorten_rest_fill_peers_transposition_and_single_undo(
             # The single undo below must undo the edit, with no no-op in between.
             assert "setEventDuration" in bridge.diagnostics().commands
             assert "setEventDuration" not in bridge.diagnostics().sequence_commands
-        assert await bridge.get_cursor_info() == cursor
+        current_cursor = await bridge.get_cursor_info()
+        # CursorInfo includes live contents under the cursor. Editing that very
+        # chord must change element.duration while every position field stays put.
+        assert current_cursor.model_dump(exclude={"element"}) == cursor.model_dump(
+            exclude={"element"}
+        )
+        if applied and (staff, voice, event.tick) == (
+            cursor.staff,
+            cursor.voice,
+            cursor.tick,
+        ):
+            assert current_cursor.element is not None
+            assert current_cursor.element.duration == duration
+        else:
+            assert current_cursor.element == cursor.element
     finally:
         if applied:
             await bridge.undo()
         restored = await bridge.read_passage(1, 1)
+        restored_cursor = await bridge.get_cursor_info()
         await bridge.disconnect()
     assert restored == before
+    assert restored_cursor == cursor
 
 
 @pytest.mark.anyio()
