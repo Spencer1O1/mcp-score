@@ -264,6 +264,73 @@ Live integration fixtures exercise ordinary and reordered chords, stale/no-op
 requests, Bb and octave transposition, and unsupported tied, tuplet, grace,
 and quarter-tone notes across the supported MuseScore matrix.
 
+## Retained mutation receipts
+
+`execute_mutation_once` adds duplicate protection to an explicitly identified
+guarded pitch request. Other mutation tools, including `set_live_note_pitch`,
+retain their existing behavior and **do not** gain duplicate protection.
+
+Before the first execution call:
+
+1. Connect and retain `bridge.receipts.plugin_session`, or obtain it from
+   `get_musescore_bridge_info`. A null receipt capability requires an upgrade.
+2. Create and retain a unique `operation_id` in the MCP client (a UUID is
+   recommended). IDs are global within that plugin instance, not per connection.
+3. Retain the complete `mutation` payload with `kind: set_note_pitch` and its
+   existing strict `PitchEditRequest`, including the fresh expected snapshot.
+4. Call `execute_mutation_once` with that ID, the original session as
+   `expected_plugin_session`, and the retained mutation.
+
+After a lost response or cancelled call, explicitly retry the **identical**
+request or use `read_mutation_receipt` with its original ID/session. The server
+never automatically replays execution, generates a replacement ID, or substitutes
+a new session. Transport/protocol errors retain the caller's ID and session.
+An ordinary transport `request_id` remains a separate correlation ID.
+
+Same ID/session and canonical JSON payload executes the native handler at most
+once and returns retained history thereafter. Object key order is irrelevant;
+array order and every supplied payload field matter. Equivalent fractions or
+updated informational metadata can be different payloads and therefore conflict.
+Different payloads under an existing ID fail without replacing the old receipt.
+Unknown operation kinds, reads, batches and other mutations cannot use this
+entry point. The receipt does not extend the pitch guard to score identity,
+global revision or attachment changes.
+
+Receipt statuses are:
+
+- `completed`: the original serialized native reply was retained, including any
+  error or `applied_unverified` outcome. Completion is not an application-success
+  claim; inspect `original_reply`, whose native JSON keys are preserved.
+- `pending`: the ID was reserved before handler invocation, but no reply is yet
+  retained. Retrying it does not invoke the handler again.
+- `unknown`: a handler threw or its reply could not be safely serialized/stored.
+  The ID remains reserved; `reason` records a bounded cause.
+- `not_found`: no reservation exists at observation time. A previously queued
+  message might still arrive; this does not prove no effect or authorize a new ID.
+
+All receipts are `historical: true`. A cached applied reply remains the original
+reply after undo, further edits or score switching, and is **not** verification
+of current score contents. `cached` denotes lookup/retrieval, not successful
+execution. New reads are needed to inspect the current score.
+
+Retention is bounded and non-evicting for the lifetime of the plugin root.
+Diagnostics advertise capacity, maximum payload/reply UTF-16 code units, JSON
+depth and node limits. Safe-integer JSON numbers are required. New IDs are
+rejected before execution when full; existing lookups/retrievals still work.
+No TTL, LRU, reset or automatic clearing exists. Pending/unknown entries consume
+slots as well. Only serialized strings and primitive metadata are retained,
+never score wrapper objects. The session stays stable across socket reconnects;
+closing/restarting the plugin creates a new session and discards its ledger.
+An old-session execution or lookup is rejected, not reported absent or rebound.
+It cannot establish the original operation's outcome after that restart.
+
+The opaque token is generated once on plugin `onRun` from a timestamp and 128
+random bits, using supported QML JavaScript. Qt's QV4 `Math.random` implementation
+uses `QRandomGenerator::global()->generateDouble()` in
+[Qt 6.2](https://github.com/qt/qtdeclarative/blob/v6.2.4/src/qml/jsruntime/qv4mathobject.cpp)
+and [Qt 6.6](https://github.com/qt/qtdeclarative/blob/v6.6.0/src/qml/jsruntime/qv4mathobject.cpp).
+It identifies a plugin instance, not a score, user or authenticated connection.
+
 ## Protocol
 
 The plugin accepts JSON objects over WebSocket. Each message must have a
@@ -290,11 +357,22 @@ opening a connection, including after reconnecting. The plugin returns:
 }
 ```
 
-The command lists above are abbreviated. The plugin derives the actual lists
+The example omits optional receipt metadata and abbreviates the command lists.
+The plugin derives the actual lists
 from its command and sequence dispatch tables. The protocol revision describes
 the wire contract independently of the package version. A mismatched revision
 or malformed capability response causes the Python bridge to close the connection.
 The handshake requires no open score.
+
+Receipt support is an optional additive `receipts` capability under base
+protocol 1. It contains its own `protocolVersion: 1`, `pluginSession`,
+`supportedMutations`, fixed limits and `retention: plugin_session_non_evicting`.
+Older compatible plugins may still serve existing tools; the receipt tools
+require this capability and reject missing/incompatible versions before sending
+a mutation. The native wrapper independently requires `receiptVersion: 1` and
+the exact expected session. No receipt-to-legacy fallback exists. Reinstall
+matching server/plugin versions when upgrading; older servers with strict
+capability schemas may reject the new additive field.
 
 Before each request, the bridge checks that the negotiated plugin supports the
 command, including each step of `processSequence`. Reconnecting renegotiates and
@@ -382,6 +460,19 @@ verified mutation results.
 | Command          | Params         | Description                                    |
 | ---------------- | -------------- | ---------------------------------------------- |
 | `appendMeasures` | `{count: int}` | Append empty measures to the end of the score. |
+
+### Mutation receipt commands
+
+| Command               | Parameters                                                          | Description                                                                                     |
+| --------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `executeMutationOnce` | `{receiptVersion: 1, operationId, expectedPluginSession, mutation}` | Reserve and execute the guarded pitch mutation once, or return its retained historical receipt. |
+| `readMutationReceipt` | `{receiptVersion: 1, operationId, expectedPluginSession}`           | Look up a receipt in the exact plugin session without executing any mutation.                   |
+
+`mutation` accepts only `{kind: "set_note_pitch", request: <guarded pitch params>}`.
+These commands cannot be sequence steps. Execution is never automatically
+replayed; receipt lookup is a safe read that rechecks the original session after
+reconnect. Unknown/read-only/other mutation kinds are rejected before native
+execution. Normal raw/legacy mutations remain outside this duplicate guarantee.
 
 ### Selection and transformation
 

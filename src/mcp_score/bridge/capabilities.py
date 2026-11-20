@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field, StrictInt, StrictStr
 
+from mcp_score.bridge.receipts import ReceiptCapabilities  # noqa: TC001
 from mcp_score.bridge.results import Result
 
 __all__ = ["PROTOCOL_VERSION", "PluginCapabilities", "MuseScoreDiagnostics"]
@@ -21,6 +22,8 @@ class PluginCapabilities(Result):
     """Supported top-level protocol commands."""
     sequence_commands: list[StrictStr]
     """Commands accepted as steps of processSequence."""
+    receipts: ReceiptCapabilities | None = None
+    """Optional receipt protocol; null plugins cannot execute receipted mutations."""
 
 
 class MuseScoreDiagnostics(PluginCapabilities):

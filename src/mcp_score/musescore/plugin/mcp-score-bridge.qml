@@ -28,6 +28,7 @@ import "duration.js" as DurationEdit
 import "selection.js" as Selection
 import "sequence.js" as Sequence
 import "protocol.js" as Protocol
+import "receipts.js" as Receipts
 
 MuseScore {
     id: root
@@ -54,11 +55,14 @@ MuseScore {
 
     // Human-readable server state, shown in the plugin window.
     property string statusText: "Starting..."
+    property var receiptState: null
 
     // Command name -> implementation. Every implementation takes the
     // plugin (for the cursor state and MuseScore's API) and the params.
     readonly property var commands: ({
         "getCapabilities":      Protocol.getCapabilities,
+        "executeMutationOnce": Receipts.executeMutationOnce,
+        "readMutationReceipt": Receipts.readMutationReceipt,
         "ping":                 Reading.ping,
         "getScore":             Reading.getScore,
         "getCursorInfo":        Reading.getCursorInfo,
@@ -155,6 +159,7 @@ MuseScore {
     // ── Plugin lifecycle ────────────────────────────────────────────
 
     onRun: {
+        receiptState = Receipts.newState();
         startServer();
     }
 

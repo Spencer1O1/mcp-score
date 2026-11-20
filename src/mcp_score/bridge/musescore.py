@@ -25,6 +25,7 @@ from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
+from mcp_score.bridge.receipts import MutationReceipt, ReceiptExecution, ReceiptIdentity
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -71,6 +72,8 @@ class MuseScoreCommand(StrEnum):
     GET_CURSOR_INFO = "getCursorInfo"
     READ_PASSAGE = "readPassage"
     READ_CURRENT_SELECTION = "readCurrentSelection"
+    EXECUTE_MUTATION_ONCE = "executeMutationOnce"
+    READ_MUTATION_RECEIPT = "readMutationReceipt"
     GO_TO_MEASURE = "goToMeasure"
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
@@ -137,6 +140,22 @@ class MuseScoreBridge(WebSocketBridge):
                 "MuseScore plugin advertises sequence commands absent from its "
                 f"supported commands. {PLUGIN_UPGRADE_HINT}"
             )
+        if (
+            capabilities.receipts is not None
+            and capabilities.receipts.protocol_version != 1
+        ):
+            raise TransportError(
+                f"Unsupported mutation receipt protocol. {PLUGIN_UPGRADE_HINT}"
+            )
+        if capabilities.receipts is not None and not {
+            MuseScoreCommand.EXECUTE_MUTATION_ONCE,
+            MuseScoreCommand.READ_MUTATION_RECEIPT,
+            *capabilities.receipts.supported_mutations,
+        }.issubset(capabilities.commands):
+            raise TransportError(
+                "Receipt capabilities advertise missing commands. "
+                f"{PLUGIN_UPGRADE_HINT}"
+            )
         self._capabilities = capabilities
 
     async def _on_disconnecting(self, transport: WebSocketTransport) -> None:
@@ -160,6 +179,36 @@ class MuseScoreBridge(WebSocketBridge):
         if capabilities is None:
             raise BridgeError("MuseScore has no active negotiated connection.")
         action = payload.get("command")
+        if action in {
+            MuseScoreCommand.EXECUTE_MUTATION_ONCE,
+            MuseScoreCommand.READ_MUTATION_RECEIPT,
+        }:
+            receipt = capabilities.receipts
+            if receipt is None or receipt.protocol_version != 1:
+                raise BridgeError(
+                    "MuseScore plugin does not support receipt protocol 1. "
+                    f"{PLUGIN_UPGRADE_HINT}"
+                )
+            params = payload.get("params", {})
+            if (
+                not isinstance(params, dict)
+                or cast("dict[str, Any]", params).get("expectedPluginSession")
+                != receipt.plugin_session
+            ):
+                raise BridgeError(
+                    "Plugin session changed; this attempt was not sent. "
+                    "Prior outcome is not established.",
+                    code="stale_plugin_session",
+                    this_attempt_status="not_sent",
+                    prior_outcome="not_established",
+                )
+            if (
+                action == MuseScoreCommand.EXECUTE_MUTATION_ONCE
+                and "setNotePitch" not in receipt.supported_mutations
+            ):
+                raise BridgeError(
+                    "Plugin does not support receipted guarded pitch mutations."
+                )
         if action not in capabilities.commands:
             raise BridgeError(
                 f"MuseScore plugin {capabilities.plugin_version} does not support "
@@ -188,6 +237,7 @@ class MuseScoreBridge(WebSocketBridge):
             MuseScoreCommand.GET_CURSOR_INFO,
             MuseScoreCommand.READ_PASSAGE,
             MuseScoreCommand.READ_CURRENT_SELECTION,
+            MuseScoreCommand.READ_MUTATION_RECEIPT,
         }
 
     async def send_command(
@@ -263,6 +313,68 @@ class MuseScoreBridge(WebSocketBridge):
     async def read_current_selection(self) -> CurrentSelection:
         return await self._run(
             CurrentSelection, MuseScoreCommand.READ_CURRENT_SELECTION
+        )
+
+    async def _receipt_request(
+        self, action: MuseScoreCommand, request: ReceiptIdentity
+    ) -> MutationReceipt:
+        params = cast("dict[str, Any]", _camel_case_keys(request.model_dump()))
+        params["receiptVersion"] = 1
+        try:
+            reply = await self.send_command(action, params)
+            result = reply.get("result")
+            if not isinstance(result, dict):
+                raise BridgeError("Plugin returned an invalid mutation receipt.")
+            result = cast("dict[str, Any]", result)
+            original = result.get("originalReply")
+            envelope = cast(
+                "dict[str, Any]",
+                _snake_case_keys(
+                    {
+                        key: value
+                        for key, value in result.items()
+                        if key != "originalReply"
+                    }
+                ),
+            )
+            envelope["original_reply"] = original
+            receipt = MutationReceipt.model_validate(envelope)
+            if (
+                receipt.operation_id != request.operation_id
+                or receipt.plugin_session != request.expected_plugin_session
+            ):
+                raise BridgeError(
+                    "Mutation receipt identity does not match the caller's request.",
+                    code="invalid_mutation_receipt",
+                    mutation_status="unknown",
+                )
+            return receipt
+        except ValidationError as error:
+            raise BridgeError(
+                f"Plugin returned an invalid mutation receipt: {error}",
+                code="invalid_mutation_receipt",
+                mutation_status="unknown",
+                operation_id=request.operation_id,
+                expected_plugin_session=request.expected_plugin_session,
+            ) from error
+        except BridgeError as error:
+            raise BridgeError(
+                str(error),
+                **{
+                    **error.details,
+                    "operation_id": request.operation_id,
+                    "expected_plugin_session": request.expected_plugin_session,
+                },
+            ) from error
+
+    async def execute_mutation_once(self, request: ReceiptExecution) -> MutationReceipt:
+        return await self._receipt_request(
+            MuseScoreCommand.EXECUTE_MUTATION_ONCE, request
+        )
+
+    async def read_mutation_receipt(self, request: ReceiptIdentity) -> MutationReceipt:
+        return await self._receipt_request(
+            MuseScoreCommand.READ_MUTATION_RECEIPT, request
         )
 
     # ── Navigation and selection ────────────────────────────────────

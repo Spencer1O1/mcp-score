@@ -80,6 +80,8 @@ async def connect_to_musescore(
     The MCP Score Bridge plugin must be running in MuseScore with its
     window open. Connecting disconnects any other application.
     Negotiates the plugin protocol and returns supported commands and versions.
+    Receipt-capable plugins also return their session token and retention limits;
+    retain that token before calling execute_mutation_once.
     Incompatible or legacy plugins must be reinstalled before connecting.
 
     Args:
@@ -100,6 +102,8 @@ async def get_musescore_bridge_info(context: ScoreContext) -> MuseScoreDiagnosti
 
     Requires an active MuseScore connection. Does not read or modify the score.
     Command availability describes protocol operations, not notation coverage.
+    Optional receipts include the plugin session token, receipt protocol version,
+    supported mutations and fixed limits; null requires an upgrade for receipts.
     """
     bridge = require_bridge(context)
     if bridge is not registry_of(context).musescore:

@@ -21,6 +21,8 @@ Connect to a running MuseScore Studio (4.4.2 or later).
 The MCP Score Bridge plugin must be running in MuseScore with its
 window open. Connecting disconnects any other application.
 Negotiates the plugin protocol and returns supported commands and versions.
+Receipt-capable plugins also return their session token and retention limits;
+retain that token before calling execute_mutation_once.
 Incompatible or legacy plugins must be reinstalled before connecting.
 
 | Parameter | Type  | Default       | Description                          |
@@ -108,18 +110,21 @@ Get negotiated protocol, plugin/server versions and supported commands.
 
 Requires an active MuseScore connection. Does not read or modify the score.
 Command availability describes protocol operations, not notation coverage.
+Optional receipts include the plugin session token, receipt protocol version,
+supported mutations and fixed limits; null requires an upgrade for receipts.
 
 No parameters.
 
 **Returns** `MuseScoreDiagnostics`: Negotiated plugin capabilities and the Python server's package version.
 
-| Field               | Type        | Description                                    |
-| ------------------- | ----------- | ---------------------------------------------- |
-| `protocol_version`  | `int`       |                                                |
-| `plugin_version`    | `str`       |                                                |
-| `commands`          | `list[str]` | Supported top-level protocol commands.         |
-| `sequence_commands` | `list[str]` | Commands accepted as steps of processSequence. |
-| `server_version`    | `str`       |                                                |
+| Field               | Type                          | Description                                                                 |
+| ------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `protocol_version`  | `int`                         |                                                                             |
+| `plugin_version`    | `str`                         |                                                                             |
+| `commands`          | `list[str]`                   | Supported top-level protocol commands.                                      |
+| `sequence_commands` | `list[str]`                   | Commands accepted as steps of processSequence.                              |
+| `receipts`          | `ReceiptCapabilities \| None` | Optional receipt protocol; null plugins cannot execute receipted mutations. |
+| `server_version`    | `str`                         |                                                                             |
 
 ### `ping_score_app`
 
@@ -601,6 +606,75 @@ No parameters.
 | `measure` | `int` | Measure number (1-indexed). |
 | `staff`   | `int` | Staff index (0-indexed).    |
 
+## Receipts tools
+
+Execute explicitly identified guarded mutations and retrieve their history.
+
+### `execute_mutation_once`
+
+Execute one guarded pitch request with a caller-retained operation ID.
+
+Create and retain a unique operation_id BEFORE the first call. Obtain the
+plugin session from connect_to_musescore/get_musescore_bridge_info. Repeating
+the identical ID, session and complete payload returns retained history;
+changing the payload conflicts. This command is never automatically replayed.
+After a lost response or cancellation, explicitly retry the exact request or
+read its receipt. Never replace the session token automatically after restart.
+Only set_note_pitch is supported; legacy mutation tools are not protected.
+
+Receipt completion means an original native reply was retained, including
+errors; it does not mean the edit succeeded. Replies are HISTORICAL, including
+after undo or further edits, and are not verification of current score state.
+Pending/unknown IDs remain reserved. The bounded non-evicting ledger lasts
+only for that plugin instance. Native score identity is not established.
+
+| Parameter                 | Type                   | Default    | Description |
+| ------------------------- | ---------------------- | ---------- | ----------- |
+| `operation_id`            | `str`                  | (required) |             |
+| `expected_plugin_session` | `str`                  | (required) |             |
+| `mutation`                | `GuardedPitchMutation` | (required) |             |
+
+**Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
+
+| Field            | Type                                                   | Description                                                                  |
+| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                  |                                                                              |
+| `operation_id`   | `str`                                                  |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
+| `command`        | `str \| None`                                          |                                                                              |
+| `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                 |                                                                              |
+| `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                          | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+
+### `read_mutation_receipt`
+
+Read retained operation history from the SAME plugin instance.
+
+Not-found means no reservation exists at observation time; an earlier queued
+request may still arrive. It does not authorize a new ID or prove no effect.
+A restarted plugin rejects the old session rather than reporting not-found.
+Stored replies are historical, not the current score. Lookup never executes
+a mutation and remains available when the non-evicting ledger is full.
+
+| Parameter                 | Type  | Default    | Description |
+| ------------------------- | ----- | ---------- | ----------- |
+| `operation_id`            | `str` | (required) |             |
+| `expected_plugin_session` | `str` | (required) |             |
+
+**Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
+
+| Field            | Type                                                   | Description                                                                  |
+| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `plugin_session` | `str`                                                  |                                                                              |
+| `operation_id`   | `str`                                                  |                                                                              |
+| `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
+| `command`        | `str \| None`                                          |                                                                              |
+| `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
+| `historical`     | `bool`                                                 |                                                                              |
+| `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
+| `reason`         | `str \| None`                                          | Bounded cause for an unknown receipt; no automatic retry is implied.         |
+
 ## Generate tools
 
 Generation tools — run music21 scripts and serve the score-generate guide.
@@ -801,17 +875,30 @@ Every event in the fresh target voice's complete measure read.
 | `displayed_tpc` | `int` |             |
 | `name`          | `str` |             |
 
+### `GuardedPitchMutation`
+
+| Field     | Type               | Description |
+| --------- | ------------------ | ----------- |
+| `kind`    | `str`              |             |
+| `request` | `PitchEditRequest` |             |
+
+### `JsonValue`
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+
 ### `MuseScoreDiagnostics`
 
 Negotiated plugin capabilities and the Python server's package version.
 
-| Field               | Type        | Description                                    |
-| ------------------- | ----------- | ---------------------------------------------- |
-| `protocol_version`  | `int`       |                                                |
-| `plugin_version`    | `str`       |                                                |
-| `commands`          | `list[str]` | Supported top-level protocol commands.         |
-| `sequence_commands` | `list[str]` | Commands accepted as steps of processSequence. |
-| `server_version`    | `str`       |                                                |
+| Field               | Type                          | Description                                                                 |
+| ------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `protocol_version`  | `int`                         |                                                                             |
+| `plugin_version`    | `str`                         |                                                                             |
+| `commands`          | `list[str]`                   | Supported top-level protocol commands.                                      |
+| `sequence_commands` | `list[str]`                   | Commands accepted as steps of processSequence.                              |
+| `receipts`          | `ReceiptCapabilities \| None` | Optional receipt protocol; null plugins cannot execute receipted mutations. |
+| `server_version`    | `str`                         |                                                                             |
 
 ### `Note`
 
@@ -897,6 +984,35 @@ A chord tone, with concert pitch spelling independent of display mode.
 | `name`          | `str`         | Concert spelling and octave, for example C#4 or Db4.                  |
 | `written_tpc`   | `int \| None` | Written TPC (tpc2), without octave; null on older plugins.            |
 | `displayed_tpc` | `int`         | TPC in the current concert/transposed display mode; not a MIDI pitch. |
+
+### `PitchEditRequest`
+
+Coordinates and preconditions that must survive validation unchanged.
+
+| Field        | Type                | Description |
+| ------------ | ------------------- | ----------- |
+| `measure`    | `int`               |             |
+| `staff`      | `int`               |             |
+| `voice`      | `int`               |             |
+| `offset`     | `WholeNoteFraction` |             |
+| `note_index` | `int`               |             |
+| `pitch`      | `int`               |             |
+| `tpc`        | `int`               |             |
+| `expected`   | `ExpectedChord`     |             |
+
+### `ReceiptCapabilities`
+
+| Field                 | Type        | Description |
+| --------------------- | ----------- | ----------- |
+| `protocol_version`    | `int`       |             |
+| `plugin_session`      | `str`       |             |
+| `supported_mutations` | `list[str]` |             |
+| `capacity`            | `int`       |             |
+| `max_payload_units`   | `int`       |             |
+| `max_reply_units`     | `int`       |             |
+| `max_depth`           | `int`       |             |
+| `max_nodes`           | `int`       |             |
+| `retention`           | `str`       |             |
 
 ### `SelectionItem`
 

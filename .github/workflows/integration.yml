@@ -103,7 +103,20 @@ jobs:
       - name: Guarded pitch tests (live plugin)
         env:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_pitch.py -v
+          MCP_SCORE_RECEIPT_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_pitch.py tests/integration/test_musescore_receipts.py -v
+
+      - name: Restart disposable pitch fixture for receipt session isolation
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Old receipt session is rejected after native restart
+        env:
+          MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |
@@ -201,7 +214,20 @@ jobs:
       - name: Guarded pitch tests (live plugin)
         env:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_pitch.py -v
+          MCP_SCORE_RECEIPT_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_pitch.py tests/integration/test_musescore_receipts.py -v
+
+      - name: Restart disposable pitch fixture for receipt session isolation
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Old receipt session is rejected after native restart
+        env:
+          MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |
@@ -301,7 +327,20 @@ jobs:
       - name: Guarded pitch tests (live plugin)
         env:
           MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
-        run: uv run pytest tests/integration/test_musescore_pitch.py -v
+          MCP_SCORE_RECEIPT_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_pitch.py tests/integration/test_musescore_receipts.py -v
+
+      - name: Restart disposable pitch fixture for receipt session isolation
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Old receipt session is rejected after native restart
+        env:
+          MCP_SCORE_RECEIPT_RESTART_FIXTURE: "1"
+          MCP_SCORE_RECEIPT_RESTART_STATE: ${{ env.MUSESCORE_CACHE_DIR }}/receipt-ticket.json
+        run: uv run pytest tests/integration/test_musescore_receipt_restart.py -v
 
       - name: Start disposable guarded-duration fixture
         run: |
