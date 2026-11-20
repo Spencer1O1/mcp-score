@@ -58,7 +58,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.MUSESCORE_CACHE_DIR }}
-          key: musescore-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
+          key: musescore-private-profile-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
 
       - name: Install MuseScore
         id: musescore
@@ -71,6 +71,10 @@ jobs:
           MCP_SCORE_MUSESCORE_PATH: ${{ steps.musescore.outputs.executable }}
         # MuseScore needs an X display even for export.
         run: xvfb-run -a uv run pytest tests/integration/test_musescore_render.py -v
+
+      - name: Snapshot ordinary user profile after headless rendering
+        id: profile_snapshot
+        run: uv run scripts/musescore_harness.py snapshot-normal-profile musescore-profile-before.json
 
       - name: Start MuseScore with the bridge plugin
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
@@ -88,14 +92,22 @@ jobs:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
 
-      - name: Stop MuseScore and collect logs
+      - name: Stop only owned MuseScore and display processes
         if: always()
-        run: |
-          uv run scripts/musescore_harness.py stop
-          mkdir -p musescore-logs
-          cp ~/.local/share/MuseScore/MuseScore4/logs/*.log musescore-logs/ 2>/dev/null || true
-          cp -r ~/.local/share/MuseScore/MuseScore4/logs/dumps musescore-logs/ 2>/dev/null || true
-          cp "${TMPDIR:-/tmp}/mcp-score-musescore.log" musescore-logs/ 2>/dev/null || true
+        run: uv run scripts/musescore_harness.py stop
+
+      - name: Collect private profile logs
+        if: always()
+        run: uv run scripts/musescore_harness.py collect-logs musescore-logs
+
+      - name: Remove owned private profile after log collection
+        if: always()
+        run: uv run scripts/musescore_harness.py clean
+
+      - name: Verify ordinary user profile was not changed
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -121,7 +133,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.MUSESCORE_CACHE_DIR }}
-          key: musescore-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
+          key: musescore-private-profile-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
 
       - name: Install MuseScore
         id: musescore
@@ -134,6 +146,10 @@ jobs:
         env:
           MCP_SCORE_MUSESCORE_PATH: ${{ steps.musescore.outputs.executable }}
         run: uv run pytest tests/integration/test_musescore_render.py -v
+
+      - name: Snapshot ordinary user profile after headless rendering
+        id: profile_snapshot
+        run: uv run scripts/musescore_harness.py snapshot-normal-profile musescore-profile-before.json
 
       - name: Start MuseScore with the bridge plugin
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
@@ -151,15 +167,22 @@ jobs:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
 
-      - name: Stop MuseScore and collect logs
+      - name: Stop only owned MuseScore and display processes
         if: always()
-        shell: bash
-        run: |
-          uv run scripts/musescore_harness.py stop
-          mkdir -p musescore-logs
-          cp "$LOCALAPPDATA"/MuseScore/MuseScore4/logs/*.log musescore-logs/ 2>/dev/null || true
-          cp -r "$LOCALAPPDATA"/MuseScore/MuseScore4/logs/dumps musescore-logs/ 2>/dev/null || true
-          cp "$TEMP"/mcp-score-musescore.log musescore-logs/ 2>/dev/null || true
+        run: uv run scripts/musescore_harness.py stop
+
+      - name: Collect private profile logs
+        if: always()
+        run: uv run scripts/musescore_harness.py collect-logs musescore-logs
+
+      - name: Remove owned private profile after log collection
+        if: always()
+        run: uv run scripts/musescore_harness.py clean
+
+      - name: Verify ordinary user profile was not changed
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-normal-profile musescore-profile-before.json
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -175,6 +198,9 @@ jobs:
     env:
       MUSESCORE_VERSION: ${{ needs.versions.outputs.latest }}
       MUSESCORE_CACHE_DIR: ${{ github.workspace }}/.musescore
+      # Native CFPreferences cannot be proven private per-process on this OS.
+      # This explicit mode uses the disposable GitHub-hosted runner account.
+      MUSESCORE_MACOS_RUNNER_ISOLATION: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -185,7 +211,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.MUSESCORE_CACHE_DIR }}
-          key: musescore-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
+          key: musescore-private-profile-${{ runner.os }}-${{ env.MUSESCORE_VERSION }}
 
       - name: Install MuseScore
         id: musescore
@@ -197,6 +223,10 @@ jobs:
         env:
           MCP_SCORE_MUSESCORE_PATH: ${{ steps.musescore.outputs.executable }}
         run: uv run pytest tests/integration/test_musescore_render.py -v
+
+      - name: Record disposable runner account profile before live tests
+        id: profile_snapshot
+        run: uv run scripts/musescore_harness.py snapshot-normal-profile musescore-profile-before.json
 
       - name: Start MuseScore with the bridge plugin
         run: uv run scripts/musescore_harness.py start tests/integration/fixtures/fixture.musicxml
@@ -214,14 +244,22 @@ jobs:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
 
-      - name: Stop MuseScore and collect logs
+      - name: Stop only owned MuseScore and display processes
         if: always()
-        run: |
-          uv run scripts/musescore_harness.py stop
-          mkdir -p musescore-logs
-          cp ~/Library/Application\ Support/MuseScore/MuseScore4/logs/*.log musescore-logs/ 2>/dev/null || true
-          cp -r ~/Library/Application\ Support/MuseScore/MuseScore4/logs/dumps musescore-logs/ 2>/dev/null || true
-          cp "${TMPDIR:-/tmp}/mcp-score-musescore.log" musescore-logs/ 2>/dev/null || true
+        run: uv run scripts/musescore_harness.py stop
+
+      - name: Collect owned artifact and disposable account logs
+        if: always()
+        run: uv run scripts/musescore_harness.py collect-logs musescore-logs
+
+      - name: Remove owned artifacts after log collection
+        if: always()
+        run: uv run scripts/musescore_harness.py clean
+
+      - name: Audit explicit disposable runner account boundary after cleanup
+        if: always() && steps.profile_snapshot.outcome == 'success'
+        run: uv run scripts/musescore_harness.py verify-runner-account-boundary musescore-profile-before.json musescore-logs/runner-account-boundary.json
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

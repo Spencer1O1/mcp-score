@@ -44,6 +44,7 @@ packages = ["src/mcp_score"]
 
 [dependency-groups]
 dev = [
+    "psutil>=7.2,<8",
     "pyright>=1.1,<2",
     "pytest>=9.0,<10",
     "pytest-cov>=7.0,<8",

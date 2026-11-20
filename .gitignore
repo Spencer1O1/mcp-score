@@ -36,3 +36,8 @@ result
 
 # Generated scores (user output, not tracked)
 output/
+
+# MuseScore integration artifacts
+.musescore/
+musescore-logs/
+musescore-profile-before.json
