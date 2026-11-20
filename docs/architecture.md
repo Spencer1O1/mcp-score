@@ -60,7 +60,7 @@ mcp-score supports multiple score notation applications through a common bridge 
 
 ```
 ScoreBridge (ABC)             -- the operations every tool needs
-└── WebSocketBridge           -- connection lifecycle over a WebSocketTransport, one reconnect
+└── WebSocketBridge           -- connection lifecycle, safe-read reconnects
     ├── MuseScoreBridge       -- the MuseScore QML plugin's command/params protocol
     └── RemoteControlBridge   -- Remote Control handshake/command protocol
         └── DoricoBridge      -- Dorico defaults (port 4560)
@@ -68,10 +68,35 @@ ScoreBridge (ABC)             -- the operations every tool needs
 
 - `ScoreBridge` -- the abstract interface: connection, navigation, reading, and every edit the tools offer, each returning one of the result models in `bridge/results.py` and raising `BridgeError` when the application cannot do it
 - `WebSocketTransport` -- owns the socket: open, close, send, and one request/reply exchange
-- `WebSocketBridge` -- connects a transport, auto-connects on the first command, reconnects once on a lost connection, and gives subclasses two hooks (`_on_connected`, `_on_disconnecting`) for their protocol's handshake
+- `WebSocketBridge` -- connects a transport, auto-connects on the first command, reconnects once for an allowlisted read-only request, and gives subclasses two hooks (`_on_connected`, `_on_disconnecting`) for their protocol's handshake
 - `MuseScoreBridge` -- frames commands for the MuseScore plugin and maps the interface to plugin commands
 - `RemoteControlBridge` -- Remote Control protocol logic, kept separate from application defaults: handshake with session tokens, command formatting, barline mapping, and limitation messages
 - `DoricoBridge` -- thin subclass providing Dorico-specific defaults
+
+### Lost replies and mutation outcomes
+
+Transport reconnection is permitted only for known read-only requests. MuseScore
+health, metadata, cursor, and passage queries and Dorico information, status,
+and property queries can be repeated after a new protocol handshake. Support
+checks run again on the replacement connection. Mutations, navigation, batches,
+and unknown commands or message types are not automatically replayed.
+
+A send or receive failure cannot establish whether a mutation was applied. The
+bridge closes that connection and raises `BridgeError` with
+`code: "outcome_unknown"`, `mutation_status: "unknown"`, the operation and target,
+and `replayed: false`. A request that was provably never sent instead reports
+`code: "request_not_sent"` and `mutation_status: "not_applied"`.
+
+Each failure has a client-generated `request_id` for correlating diagnostics.
+It is not sent to the score application, is not a deduplication key, and does
+not make a manual retry safe. Server-side duplicate detection is not implemented.
+For an unknown outcome, inspect the score before retrying or undoing; either
+operation could otherwise apply an unintended change.
+
+The MCP SDK carries anticipated errors as text. When a `BridgeError` has details,
+`score_tool` preserves them as a JSON envelope containing `error` and `details`
+in the tool error text; the SDK may prefix the tool name. Errors without details
+retain their plain message. Tool error status remains an error, not success.
 
 ### Bridge registry
 

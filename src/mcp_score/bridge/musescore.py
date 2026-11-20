@@ -174,6 +174,15 @@ class MuseScoreBridge(WebSocketBridge):
                                 f"{index}: {step_action!r}. {PLUGIN_UPGRADE_HINT}"
                             )
 
+    def _is_replay_safe(self, payload: dict[str, Any]) -> bool:
+        return payload.get("command") in {
+            MuseScoreCommand.PING,
+            MuseScoreCommand.GET_CAPABILITIES,
+            MuseScoreCommand.GET_SCORE,
+            MuseScoreCommand.GET_CURSOR_INFO,
+            MuseScoreCommand.READ_PASSAGE,
+        }
+
     async def send_command(
         self, action: str, params: dict[str, Any] | None = None
     ) -> CommandResult:

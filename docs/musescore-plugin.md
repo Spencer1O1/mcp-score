@@ -128,7 +128,7 @@ The handshake requires no open score.
 
 Before each request, the bridge checks that the negotiated plugin supports the
 command, including each step of `processSequence`. Reconnecting renegotiates and
-rechecks support before retrying a request. Unsupported operations are rejected
+rechecks support before retrying an allowlisted read-only request. Unsupported operations are rejected
 without sending them to the plugin.
 
 `connect_to_musescore` returns the negotiated plugin protocol, plugin version,
@@ -297,11 +297,27 @@ Any other text is accepted as the marking's text; only the ones listed also set 
 - Check that the cursor position (measure, staff) is within valid ranges
 - Use `getScore` to verify the score state and `getCursorInfo` to check cursor position
 
+### A mutation reports an unknown outcome
+
+If sending an edit or receiving its reply fails, the Python bridge closes the
+connection and does not replay the edit. This also applies to `processSequence`,
+undo, navigation, and commands whose safety is unknown. Read-only requests may
+reconnect and retry after negotiating support again.
+
+The tool error text includes a JSON envelope with `details.code` set to
+`outcome_unknown`, `mutation_status` set to `unknown`, and `replayed` set to
+`false`. The operation, target, cause, and a diagnostic `request_id` are retained.
+The request ID is client-only correlation data, not a server deduplication key.
+Inspect the live score before deciding whether to retry or undo. A lost reply
+does not establish that an edit failed or that a sequence rolled back.
+
 ### processSequence rolls back unexpectedly
 
 - If any step in the sequence fails, all steps are undone
 - Check the `failedAction` and `failedIndex` fields in the error response to identify which step failed
-- Fix the failing step and retry the entire sequence
+- For a plugin-reported failure, inspect the reported step and rollback before
+  correcting and resubmitting the sequence. For a transport error with an unknown
+  outcome, inspect the live score first; rollback has not been confirmed.
 
 ## Plugin development notes
 
