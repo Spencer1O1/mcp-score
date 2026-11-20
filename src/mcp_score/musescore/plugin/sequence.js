@@ -27,64 +27,109 @@ var steps = {
 
 /// Execute one step inside the caller's undo step.
 function executeStep(plugin, action, params) {
-    var step = steps[action];
-    if (!step) {
+    if (!Object.prototype.hasOwnProperty.call(steps, action)) {
         return { error: "Unknown action in sequence: " + action };
     }
-    return step(plugin, params);
+    return steps[action](plugin, params);
 }
 
 /// Execute multiple actions in a single undo step.
-/// If any action fails, the score and the cursor are restored to
-/// their state before the sequence.
+/// Validate every step's structure before execution. Argument semantics may
+/// depend on earlier steps (for example navigating to an appended measure).
+/// Failures request native score rollback and restore the logical cursor.
 ///
 /// Params: { sequence: [{ action, params }, ...] }
 function processSequence(plugin, params) {
     var scoreErr = Score.requireScore(plugin);
     if (scoreErr) return scoreErr;
 
-    if (!params.sequence || !Array.isArray(params.sequence)) {
-        return { error: "Missing required parameter: sequence (array of {action, params})" };
+    if (!params || typeof params !== "object" || !Array.isArray(params.sequence)) {
+        return validationFailure("Missing required parameter: sequence (array of {action, params})");
     }
     var sequence = params.sequence;
     if (sequence.length === 0) {
         return { result: { results: [], count: 0 } };
     }
 
+    for (var index = 0; index < sequence.length; index++) {
+        var candidate = sequence[index];
+        var error = null;
+        if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+            error = "must be an object";
+        } else if (typeof candidate.action !== "string" || candidate.action.length === 0) {
+            error = "must have a nonempty string 'action' field";
+        } else if (!Object.prototype.hasOwnProperty.call(steps, candidate.action)) {
+            error = "Unknown action in sequence: " + candidate.action;
+        } else if (candidate.params !== undefined && (!candidate.params
+                || typeof candidate.params !== "object" || Array.isArray(candidate.params))) {
+            error = "'params' must be an object when supplied";
+        }
+        if (error !== null) {
+            var rejected = validationFailure("Step " + index + " " + error);
+            rejected.failedIndex = index;
+            if (candidate && typeof candidate.action === "string") {
+                rejected.failedAction = candidate.action;
+            }
+            return rejected;
+        }
+    }
+
     var savedMeasure = plugin.cursorMeasure;
     var savedStaff = plugin.cursorStaff;
+    var savedVoice = plugin.cursorVoice;
+    var committed = false;
 
-    var response = Score.withUndoStep(plugin, "processSequence", function() {
-        var results = [];
-        for (var i = 0; i < sequence.length; i++) {
-            var step = sequence[i];
-            var action = step.action;
-            if (!action) {
-                return { error: "Step " + i + " is missing 'action' field", failedIndex: i, results: results };
+    try {
+        var response = Score.withUndoStep(plugin, "processSequence", function() {
+            var results = [];
+            for (var i = 0; i < sequence.length; i++) {
+                var step = sequence[i];
+                var action = step.action;
+                var stepResult;
+                try {
+                    stepResult = executeStep(plugin, action, step.params === undefined ? {} : step.params);
+                    if (!stepResult || typeof stepResult !== "object" || Array.isArray(stepResult)) {
+                        throw new Error("Action returned an invalid response");
+                    }
+                } catch (e) {
+                    stepResult = { error: e && e.message ? e.message : String(e) };
+                }
+                if (stepResult.error !== undefined) {
+                    return {
+                        error: "Step " + i + " (" + action + ") failed: " + stepResult.error,
+                        failedAction: action,
+                        failedIndex: i,
+                        results: results
+                    };
+                }
+                results.push(stepResult.result);
             }
+            return { result: { results: results, count: results.length } };
+        });
 
-            var stepResult;
-            try {
-                stepResult = executeStep(plugin, action, step.params || {});
-            } catch (e) {
-                stepResult = { error: e.message || String(e) };
-            }
-            if (stepResult.error) {
-                return {
-                    error: "Step " + i + " (" + action + ") failed: " + stepResult.error,
-                    failedAction: action,
-                    failedIndex: i,
-                    results: results
-                };
-            }
-            results.push(stepResult.result);
+        committed = response.error === undefined;
+        if (!committed) {
+            // endCmd(true) returned, but no complete content read-back was done.
+            response.mutationStatus = "unknown";
+            response.rollbackStatus = "requested";
         }
-        return { result: { results: results, count: results.length } };
-    });
-
-    if (response.error !== undefined) {
-        plugin.cursorMeasure = savedMeasure;
-        plugin.cursorStaff = savedStaff;
+        return response;
+    } catch (exception) {
+        // A transaction-boundary exception cannot confirm commit or rollback.
+        return {
+            error: exception && exception.message ? exception.message : String(exception),
+            mutationStatus: "unknown",
+            rollbackStatus: "unknown"
+        };
+    } finally {
+        if (!committed) {
+            plugin.cursorMeasure = savedMeasure;
+            plugin.cursorStaff = savedStaff;
+            plugin.cursorVoice = savedVoice;
+        }
     }
-    return response;
+}
+
+function validationFailure(message) {
+    return { error: message, mutationStatus: "not_applied", rollbackStatus: "not_needed" };
 }

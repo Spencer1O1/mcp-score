@@ -343,9 +343,9 @@ verified mutation results.
 
 ### Batch operations
 
-| Command           | Params                                | Description                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `processSequence` | `{sequence: [{action, params}, ...]}` | Execute several commands in one undo step; if any step fails, all steps are rolled back. Steps may use `ping`, the navigation, writing, marking, structure, selection and transformation commands above, but not `getScore`, `getCursorInfo`, `undo` or a nested `processSequence`. |
+| Command           | Params                                | Description                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `processSequence` | `{sequence: [{action, params}, ...]}` | Validate every step's structure, then execute commands in one undo step. Failures request native rollback and restore the logical cursor. Steps may use `ping`, the navigation, writing, marking, structure, selection and transformation commands above, but not `getScore`, `getCursorInfo`, `undo` or a nested `processSequence`. |
 
 ### Barline types
 
@@ -434,7 +434,24 @@ does not establish that an edit failed or that a sequence rolled back.
 
 ### processSequence rolls back unexpectedly
 
-- If any step in the sequence fails, all steps are undone
+- Every step must be an object with a nonempty string `action` from the sequence
+  dispatch table. Optional `params` must be an object; explicit `null`, arrays,
+  and primitives are rejected. The whole list is checked before any navigation,
+  score mutation, or undo command starts. Structural rejections report
+  `failedIndex`, `mutationStatus: "not_applied"`, and
+  `rollbackStatus: "not_needed"`.
+- Argument semantics are checked when each action executes, since a later step
+  can depend on an earlier change, such as navigating to an appended measure.
+  This is structural prevalidation, not complete TX-1 semantic prevalidation.
+- If a step returns an error or throws, the plugin requests rollback through
+  `endCmd(true)` and restores its logical measure, staff, and voice in `finally`.
+  It never invokes global undo on failure. UI selection restoration is not
+  guaranteed by this logical-cursor cleanup.
+- Runtime errors report `mutationStatus: "unknown"` and
+  `rollbackStatus: "requested"` when the native rollback call returns. These
+  fields confirm the request, not a complete read-back of musical contents.
+  A transaction-boundary exception reports both statuses as `"unknown"` and
+  still restores the logical cursor. Inspect the score before retrying.
 - Check the `failedAction` and `failedIndex` fields in the error response to identify which step failed
 - For a plugin-reported failure, inspect the reported step and rollback before
   correcting and resubmitting the sequence. For a transport error with an unknown
