@@ -309,6 +309,45 @@ class TestMuseScoreBridgeModifiesScore:
 
 class TestMuseScoreBridgeSequences:
     @pytest.mark.anyio()
+    async def test_malformed_late_step_rejects_before_score_or_cursor_changes(
+        self,
+    ) -> None:
+        async with _connected_bridge() as bridge:
+            await bridge.go_to_measure(1)
+            before = await bridge.get_cursor_info()
+            count_before = await _measure_count(bridge)
+
+            # Send malformed JSON-level input directly: process_sequence's typed
+            # convenience method accepts only dictionaries, while the wire can
+            # contain null. No preceding append/navigation may execute.
+            with pytest.raises(BridgeError) as exc_info:
+                await bridge.send_command(
+                    "processSequence",
+                    {
+                        "sequence": [
+                            {"action": "appendMeasures", "params": {"count": 1}},
+                            {
+                                "action": "goToMeasure",
+                                "params": {"measure": count_before + 1},
+                            },
+                            None,
+                        ]
+                    },
+                )
+            after = await bridge.get_cursor_info()
+            count_after = await _measure_count(bridge)
+
+        assert exc_info.value.details["failedIndex"] == 2
+        assert exc_info.value.details["mutationStatus"] == "not_applied"
+        assert exc_info.value.details["rollbackStatus"] == "not_needed"
+        assert count_after == count_before
+        assert (after.measure, after.staff, after.voice) == (
+            before.measure,
+            before.staff,
+            before.voice,
+        )
+
+    @pytest.mark.anyio()
     async def test_failed_sequence_rolls_back_score_and_cursor(self) -> None:
         # Arrange
         async with _connected_bridge() as bridge:
@@ -333,6 +372,8 @@ class TestMuseScoreBridgeSequences:
         # Assert
         assert exc_info.value.details["failedIndex"] == 2
         assert exc_info.value.details["failedAction"] == "goToMeasure"
+        assert exc_info.value.details["mutationStatus"] == "unknown"
+        assert exc_info.value.details["rollbackStatus"] == "requested"
         assert count_after == count_before
         assert cursor.measure == 1
 
