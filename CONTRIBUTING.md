@@ -224,6 +224,12 @@ Keep each PR to one change; small PRs get reviewed and merged faster.
 6. A maintainer will review your PR — address any feedback
 7. The maintainer squash-merges once approved
 
+Dependent pull requests must remain drafts while targeting a feature branch.
+After the parent merges, retarget the dependent PR to `main`, check its diff and
+mergeability, and verify independent review and CI for its current head before
+marking it ready. Merging into a feature branch does not deliver that change to
+`main`, even when the feature branch was previously merged.
+
 Much of this project is written with Claude Code, and that is fine for
 contributions too. Every PR is reviewed by the maintainer before merge, so
 say what you tested and how.
@@ -231,6 +237,15 @@ say what you tested and how.
 Releases follow [semver](https://semver.org/); versions stay 0.x until the
 tool set is stable, so minor releases may still change tool names and
 parameters.
+
+The guarded note/rest phases start their own `guarded-note-rest.musicxml` and
+`guarded-note-rest-concert.musicxml` fixtures with
+`MUSESCORE_NOTE_REST_TEST_SETUP=1`. Only their marked installed plugin copies
+receive fixed post-rewrite cancellation probes; normal seeding restores the
+packaged source. `MCP_SCORE_NOTE_REST_FIXTURE=normal` or `concert` opts into the
+matching integration test phase. Never opt these phases into a user score or
+normal application profile. Native versions below the supported write API
+actively verify refusal before arming any failure probe.
 
 ### Cutting a release
 

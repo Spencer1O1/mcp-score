@@ -31,6 +31,8 @@ _REQUIRED_TOOLS = {
     "read_current_selection",
     "add_live_chord_tone",
     "remove_live_chord_tone",
+    "fill_live_rest",
+    "replace_live_note_with_rest",
     "set_live_note_pitch",
     "set_live_event_duration",
 }
