@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import plistlib
+import socket
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -39,10 +43,10 @@ class TestLayoutFor:
 
         # Assert
         assert layout.preferences == harness.IniPreferences(
-            tmp_path / ".config/MuseScore/MuseScore4.ini"
+            tmp_path / "config/MuseScore/MuseScore4.ini"
         )
-        assert layout.data_dir == tmp_path / ".local/share/MuseScore/MuseScore4"
-        assert layout.plugins_dir == tmp_path / "Documents/MuseScore4/Plugins"
+        assert layout.data_dir == tmp_path / "data/MuseScore/MuseScore4"
+        assert layout.plugins_dir == tmp_path / "Plugins"
         assert layout.log_dir == layout.data_dir / "logs"
 
     def test_macos_uses_native_preferences_and_library_data(
@@ -52,14 +56,14 @@ class TestLayoutFor:
         layout = harness.layout_for("Darwin", tmp_path)
 
         # Assert
-        assert layout.preferences == harness.MacOSPreferences(
-            "org.musescore.MuseScore4"
+        assert layout.preferences == harness.PlistPreferences(
+            tmp_path / "Library/Preferences/org.musescore.MuseScore4.plist"
         )
         assert (
             layout.data_dir
             == tmp_path / "Library/Application Support/MuseScore/MuseScore4"
         )
-        assert layout.plugins_dir == tmp_path / "Documents/MuseScore4/Plugins"
+        assert layout.plugins_dir == tmp_path / "Plugins"
 
     def test_windows_honours_appdata_variables(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -73,9 +77,9 @@ class TestLayoutFor:
 
         # Assert
         assert layout.preferences == harness.IniPreferences(
-            tmp_path / "Roaming/MuseScore/MuseScore4.ini"
+            tmp_path / "portable/Data/settings/MuseScore/MuseScore4.ini"
         )
-        assert layout.data_dir == tmp_path / "Local/MuseScore/MuseScore4"
+        assert layout.data_dir == tmp_path / "portable/Data/settings"
 
 
 class TestReleaseAssetUrl:
@@ -90,8 +94,8 @@ class TestReleaseAssetUrl:
                 "browser_download_url": "https://example.test/x86_64.AppImage",
             },
             {
-                "name": "MuseScore-Studio-4.7.5.260831071-x86_64.msi",
-                "browser_download_url": "https://example.test/x86_64.msi",
+                "name": "MuseScore-Studio-4.7.5.260831071-x86_64.paf.exe",
+                "browser_download_url": "https://example.test/x86_64.paf.exe",
             },
             {
                 "name": "MuseScore-Studio-4.7.5.260831071.dmg",
@@ -104,7 +108,7 @@ class TestReleaseAssetUrl:
         ("system", "expected"),
         [
             ("Linux", "https://example.test/x86_64.AppImage"),
-            ("Windows", "https://example.test/x86_64.msi"),
+            ("Windows", "https://example.test/x86_64.paf.exe"),
             ("Darwin", "https://example.test/universal.dmg"),
         ],
     )
@@ -225,61 +229,24 @@ class TestSeedConfiguration:
         harness.seed_configuration(layout)
 
         # Assert
-        settings = (tmp_path / ".config/MuseScore/MuseScore4.ini").read_text()
-        assert settings == (
-            "[application]\n"
-            "hasCompletedFirstLaunchSetup=true\n"
-            "welcomeDialogShowOnStartup=false\n"
-            "welcomeDialogLastShownVersion=99.0.0\n"
-            "checkForUpdate=false\n"
-        )
+        settings = (tmp_path / "config/MuseScore/MuseScore4.ini").read_text()
+        assert "hasCompletedFirstLaunchSetup=true" in settings
+        assert "welcomeDialogShowOnStartup=false" in settings
+        assert "welcomeDialogLastShownVersion=99.0.0" in settings
+        assert "checkForUpdate=false" in settings
+        assert str(layout.plugins_dir) in settings
         assert not stale_session.exists()
 
-    def test_macos_writes_preferences_through_defaults(self, tmp_path: Path) -> None:
-        # Arrange
+    def test_macos_writes_only_the_private_plist(self, tmp_path: Path) -> None:
         layout = harness.layout_for("Darwin", tmp_path)
-        run = MagicMock()
-
-        with patch.object(harness, "run", run):
-            # Act
+        with patch.object(harness, "run") as run:
             harness.seed_configuration(layout)
-
-        # Assert: Qt maps the settings path a/b to the key a.b, typed values
-        commands = [call.args[0] for call in run.call_args_list]
-        assert commands == [
-            [
-                "defaults",
-                "write",
-                "org.musescore.MuseScore4",
-                "application.hasCompletedFirstLaunchSetup",
-                "-bool",
-                "true",
-            ],
-            [
-                "defaults",
-                "write",
-                "org.musescore.MuseScore4",
-                "application.welcomeDialogShowOnStartup",
-                "-bool",
-                "false",
-            ],
-            [
-                "defaults",
-                "write",
-                "org.musescore.MuseScore4",
-                "application.welcomeDialogLastShownVersion",
-                "-string",
-                "99.0.0",
-            ],
-            [
-                "defaults",
-                "write",
-                "org.musescore.MuseScore4",
-                "application.checkForUpdate",
-                "-bool",
-                "false",
-            ],
-        ]
+        run.assert_not_called()
+        with layout.preferences.file.open("rb") as source:
+            preferences = plistlib.load(source)
+        assert preferences["application.hasCompletedFirstLaunchSetup"] is True
+        assert preferences["application.checkForUpdate"] is False
+        assert preferences["application.paths.myPlugins"] == str(layout.plugins_dir)
 
 
 class TestLaunch:
@@ -302,7 +269,9 @@ class TestLaunch:
         with (
             patch.object(harness, "musescore_running", return_value=False),
             patch.object(harness.subprocess, "Popen", popen),
-            patch.object(harness.time, "sleep"),
+            patch.object(harness, "track_process"),
+            patch.object(harness, "refresh_owned"),
+            patch.object(harness, "STARTUP_SECONDS", 0),
         ):
             # Act
             process = harness.launch(self._settings(tmp_path), tmp_path / "s.xml")
@@ -322,22 +291,15 @@ class TestLaunch:
             patch.object(harness.subprocess, "Popen", popen),
             patch.object(harness.time, "sleep"),
             patch.object(harness, "print_log_tails"),
+            patch.object(harness, "track_process"),
+            patch.object(harness, "refresh_owned"),
+            patch.object(harness, "STARTUP_SECONDS", 0),
             pytest.raises(harness.HarnessError, match="exited during startup"),
         ):
             # Act / Assert
             harness.launch(self._settings(tmp_path), tmp_path / "s.xml")
 
         assert popen.call_count == harness.LAUNCH_ATTEMPTS
-
-
-class TestMuseScoreProcessPattern:
-    def test_linux_matches_the_appimage_binary_path(self) -> None:
-        # The AppImage's binary renames its process, so the pattern must be
-        # something that survives in the command line.
-        assert harness.musescore_process_pattern("Linux") == "bin/mscore4portable"
-
-    def test_windows_matches_the_image_name(self) -> None:
-        assert harness.musescore_process_pattern("Windows") == "MuseScore4.exe"
 
 
 class TestPluginMenuStartup:
@@ -352,6 +314,7 @@ class TestPluginMenuStartup:
         with (
             patch.object(harness, "run", side_effect=record),
             patch.object(harness.time, "sleep"),
+            patch.object(harness, "owned_musescore_pid", return_value=77),
         ):
             harness.trigger_plugin(settings)
 
@@ -359,6 +322,8 @@ class TestPluginMenuStartup:
             "xdotool",
             "search",
             "--onlyvisible",
+            "--pid",
+            "77",
             "--class",
             "mscore|MuseScore",
         ]
@@ -381,6 +346,7 @@ class TestPluginMenuStartup:
         with (
             patch.object(harness, "run", side_effect=record),
             patch.object(harness.time, "sleep"),
+            patch.object(harness, "owned_musescore_pid", return_value=77),
         ):
             harness.trigger_plugin(settings)
         assert ["xdotool", "windowfocus", "--sync", "42"] in commands
@@ -390,30 +356,269 @@ class TestPluginMenuStartup:
         with (
             patch.object(harness, "run", return_value=MagicMock(stdout="")),
             patch.object(harness, "print_log_tails") as diagnostics,
+            patch.object(harness, "owned_musescore_pid", return_value=77),
             pytest.raises(harness.HarnessError, match="no MuseScore window"),
         ):
             harness.trigger_plugin(settings)
         diagnostics.assert_called_once_with(settings.layout)
 
 
-class TestBridgeReadiness:
-    def test_start_requires_responsive_bridge_after_menu_activation(
+def make_settings(tmp_path: Path, system: str = "Linux") -> Any:
+    layout = harness.layout_for(system, tmp_path / "profile")
+    cache = tmp_path / "cache"
+    executable = cache / "squashfs-root/AppRun"
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.touch()
+    settings = harness.Settings(system, "4.7.5", cache, layout)
+    if system != "Linux":
+        settings.executable.parent.mkdir(parents=True, exist_ok=True)
+        settings.executable.touch()
+    return settings
+
+
+def sleeping_process() -> subprocess.Popen[bytes]:
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+class TestOwnership:
+    def test_existing_application_refuses_before_any_profile_write(
         self, tmp_path: Path
     ) -> None:
-        executable = tmp_path / "MuseScore"
-        executable.touch()
-        settings = MagicMock(system="Windows", executable=executable)
-        wait = AsyncMock(return_value=False)
-        trigger = MagicMock()
+        settings = make_settings(tmp_path)
+        score = tmp_path / "fixture.musicxml"
+        score.touch()
         with (
-            patch.object(harness, "seed_configuration"),
-            patch.object(harness, "launch"),
-            patch.object(harness, "trigger_plugin", trigger),
-            patch.object(harness, "wait_for_bridge", wait),
-            patch.object(harness, "print_log_tails") as diagnostics,
-            pytest.raises(harness.HarnessError, match="bridge plugin did not answer"),
+            patch.object(harness, "musescore_running", return_value=True),
+            patch.object(harness, "seed_configuration") as seed,
+            pytest.raises(harness.HarnessError, match="already running"),
         ):
-            harness.start(settings, tmp_path / "fixture.musicxml")
-        trigger.assert_called_once_with(settings)
-        wait.assert_awaited_once_with("ws://localhost:8765", 60.0)
-        diagnostics.assert_called_once_with(settings.layout)
+            harness.start(settings, score)
+        seed.assert_not_called()
+        assert not settings.layout.root.exists()
+
+    def test_nonempty_unowned_directory_is_never_adopted(self, tmp_path: Path) -> None:
+        layout = harness.layout_for("Linux", tmp_path)
+        existing = tmp_path / "important.txt"
+        existing.write_text("preserve")
+        with pytest.raises(harness.HarnessError, match="nonempty unowned"):
+            harness.claim_profile(layout)
+        assert existing.read_text() == "preserve"
+        assert not (tmp_path / harness.PROFILE_MARKER).exists()
+
+    def test_private_path_symlink_cannot_redirect_writes(self, tmp_path: Path) -> None:
+        root = tmp_path / "profile"
+        root.mkdir()
+        (root / harness.PROFILE_MARKER).write_text(harness.PROFILE_MARKER_CONTENT)
+        normal = tmp_path / "normal"
+        normal.mkdir()
+        (root / "config").symlink_to(normal, target_is_directory=True)
+        with pytest.raises(harness.HarnessError, match="escapes"):
+            harness.claim_profile(harness.layout_for("Linux", root))
+        assert list(normal.iterdir()) == []
+
+    def test_stop_only_terminates_owned_pid_and_preserves_unrelated_process(
+        self, tmp_path: Path
+    ) -> None:
+        settings = make_settings(tmp_path)
+        harness.claim_profile(settings.layout)
+        owned, unrelated = sleeping_process(), sleeping_process()
+        try:
+            harness.track_process(settings.layout, owned, "musescore")
+            with patch.object(
+                harness,
+                "run",
+                side_effect=AssertionError("No name-based process commands"),
+            ):
+                harness.stop(settings)
+            assert owned.poll() is not None
+            assert unrelated.poll() is None
+            assert not settings.layout.state_file.exists()
+        finally:
+            for process in [owned, unrelated]:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=5)
+
+    def test_reused_pid_identity_is_not_signaled(self, tmp_path: Path) -> None:
+        settings = make_settings(tmp_path)
+        harness.claim_profile(settings.layout)
+        unrelated = sleeping_process()
+        try:
+            identity = harness.identify(
+                harness.psutil.Process(unrelated.pid), "musescore"
+            )
+            stale = harness.OwnedProcess(
+                identity.pid, identity.created - 100, identity.executable, identity.kind
+            )
+            harness.save_owned(settings.layout, [stale])
+            harness.stop(settings)
+            assert unrelated.poll() is None
+        finally:
+            unrelated.terminate()
+            unrelated.wait(timeout=5)
+
+    def test_missing_state_does_not_search_for_or_kill_applications(
+        self, tmp_path: Path
+    ) -> None:
+        settings = make_settings(tmp_path)
+        harness.claim_profile(settings.layout)
+        with patch.object(
+            harness,
+            "musescore_running",
+            side_effect=AssertionError("Not an ownership check"),
+        ):
+            harness.stop(settings)
+
+    def test_owned_xvfb_cleanup_uses_identity_not_display_name(
+        self, tmp_path: Path
+    ) -> None:
+        settings = make_settings(tmp_path)
+        harness.claim_profile(settings.layout)
+        owned = sleeping_process()
+        try:
+            harness.track_process(settings.layout, owned, "xvfb")
+            harness.stop(settings)
+            assert owned.poll() is not None
+        finally:
+            if owned.poll() is None:
+                owned.terminate()
+            owned.wait(timeout=5)
+
+    def test_fixture_restart_replaces_only_owned_process(self, tmp_path: Path) -> None:
+        settings = make_settings(tmp_path)
+        score = tmp_path / "fixture.musicxml"
+        score.touch()
+        launched: list[subprocess.Popen[bytes]] = []
+
+        def launch(*arguments: object) -> subprocess.Popen[bytes]:
+            process = sleeping_process()
+            launched.append(process)
+            return process
+
+        with (
+            patch.object(harness, "preflight"),
+            patch.object(harness, "start_xvfb"),
+            patch.object(harness, "_start", side_effect=launch),
+            patch.object(harness, "STARTUP_SECONDS", 0),
+            patch.object(harness, "trigger_plugin"),
+            patch.object(harness, "verify_private_paths"),
+            patch.object(harness, "wait_for_bridge", AsyncMock(return_value=True)),
+        ):
+            try:
+                harness.start(settings, score)
+                first = harness.read_owned(settings.layout)
+                harness.stop(settings)
+                harness.start(settings, score)
+                second = harness.read_owned(settings.layout)
+                assert first[0].pid != second[0].pid
+                assert launched[0].poll() is not None and launched[1].poll() is None
+                harness.stop(settings)
+            finally:
+                for process in launched:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=5)
+
+    def test_failed_plugin_start_cleans_only_new_owned_processes(
+        self, tmp_path: Path
+    ) -> None:
+        settings = make_settings(tmp_path)
+        score = tmp_path / "fixture.musicxml"
+        score.touch()
+        owned, unrelated = sleeping_process(), sleeping_process()
+        with (
+            patch.object(harness, "preflight"),
+            patch.object(harness, "start_xvfb"),
+            patch.object(harness, "_start", return_value=owned),
+            patch.object(harness, "STARTUP_SECONDS", 0),
+            patch.object(harness, "trigger_plugin"),
+            patch.object(harness, "wait_for_bridge", AsyncMock(return_value=False)),
+            patch.object(harness, "print_log_tails"),
+        ):
+            try:
+                with pytest.raises(
+                    harness.HarnessError, match="bridge plugin did not answer"
+                ):
+                    harness.start(settings, score)
+                assert owned.poll() is not None
+                assert unrelated.poll() is None
+            finally:
+                for process in [owned, unrelated]:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=5)
+
+
+class TestPrivateEnvironment:
+    @pytest.mark.parametrize("system", ["Linux", "Windows", "Darwin"])
+    def test_child_paths_are_private_without_repurposing_home(
+        self, tmp_path: Path, system: str
+    ) -> None:
+        settings = make_settings(tmp_path, system)
+        before = dict(os.environ)
+        environment = harness.child_environment(settings)
+        assert os.environ == before
+        assert environment.get("HOME") == before.get("HOME")
+        assert environment.get("CODEX_HOME") == before.get("CODEX_HOME")
+        assert environment["TMPDIR"] == str(settings.layout.root / "tmp")
+        if system == "Linux":
+            assert environment["XDG_DATA_HOME"] == str(settings.layout.root / "data")
+        if system == "Darwin":
+            assert environment["CFFIXED_USER_HOME"] == str(settings.layout.root)
+        if system == "Windows":
+            assert settings.executable.is_relative_to(settings.layout.root)
+            assert "Program Files" not in str(settings.executable)
+
+    def test_macos_probe_reads_private_native_domain_only(self, tmp_path: Path) -> None:
+        settings = make_settings(tmp_path, "Darwin")
+        harness.seed_configuration(settings.layout)
+        with settings.layout.preferences.file.open("rb") as source:
+            nonce = plistlib.load(source)["mcp-score.profileNonce"]
+        responses = [
+            MagicMock(stdout=nonce + "\n"),
+            MagicMock(
+                stdout=str(settings.layout.root / "Library/Application Support") + "\n"
+            ),
+        ]
+        with patch.object(harness, "run", side_effect=responses) as run:
+            harness.verify_macos_preferences(settings)
+        first = run.call_args_list[0]
+        assert first.args[0][0:2] == ["defaults", "read"]
+        assert first.kwargs["env"]["CFFIXED_USER_HOME"] == str(settings.layout.root)
+
+    def test_normal_profile_snapshot_detects_changed_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        normal = tmp_path / "normal"
+        normal.mkdir()
+        settings_file = normal / "MuseScore4.ini"
+        settings_file.write_text("unchanged")
+        baseline = tmp_path / "baseline.json"
+        with patch.object(harness, "normal_profile_paths", return_value=[normal]):
+            harness.snapshot_normal_profile("Linux", baseline)
+            harness.verify_normal_profile("Linux", baseline)
+            settings_file.write_text("changed")
+            with pytest.raises(
+                harness.HarnessError, match="normal MuseScore profile changed"
+            ):
+                harness.verify_normal_profile("Linux", baseline)
+
+
+def test_occupied_bridge_refuses_before_creating_private_profile(
+    tmp_path: Path,
+) -> None:
+    settings = make_settings(tmp_path)
+    score = tmp_path / "fixture.musicxml"
+    score.touch()
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        with (
+            patch.object(harness, "BRIDGE_PORT", occupied.getsockname()[1]),
+            patch.object(harness, "musescore_running", return_value=False),
+            patch.object(harness, "seed_configuration") as seed,
+            pytest.raises(harness.HarnessError, match="Bridge port is unavailable"),
+        ):
+            harness.start(settings, score)
+    seed.assert_not_called()
+    assert not settings.layout.root.exists()

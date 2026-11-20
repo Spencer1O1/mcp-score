@@ -350,3 +350,26 @@ Things the MuseScore 4 plugin API does not document, learned by crashing MuseSco
 - **`Score.transpose` does not exist in MuseScore 4.** The plugin shifts each note's `pitch`, `tpc1` and `tpc2` itself, which is why key signatures and chord symbols in the passage are not transposed.
 - **`curScore.endCmd(true)` rolls back the current undo step.** Every command runs inside `startCmd` / `endCmd`; `processSequence` uses the rollback to restore the score when a step fails.
 - **Integration startup opens the Plugins menu.** `scripts/musescore_harness.py` enables only the bridge in the test profile. It activates the visible application window and navigates the Plugins menu on Linux and Windows, and invokes named native menu items on macOS. No custom shortcut or screen coordinates are required. The profile suppresses update checks as well as welcome dialogs, so late modal dialogs do not steal input. English menu labels are required. The bridge must answer a real ping before tests run; a running application process alone is insufficient.
+
+### Integration profile ownership
+
+The test harness uses an isolated marked profile and activates only its recorded
+MuseScore process. `stop` verifies each PID's creation time and executable before
+signaling it. It does not use process-name kills or rewrite the ordinary profile.
+Private logs remain available until `collect-logs` and `clean` are requested. See
+[the integration instructions](../CONTRIBUTING.md#integration-tests).
+
+Linux isolation uses child-specific XDG paths. Windows uses the official portable
+binary's executable-relative settings and app-data paths, rather than assuming
+`APPDATA` overrides Qt's known-folder APIs. The portable build is identified by
+its deployed data-path literal before launch. macOS uses CoreFoundation's fixed
+user-home override, reads a unique private preference sentinel, and checks
+Foundation's application-support path before launching. Current private logs and
+new application preference writes are required for startup to succeed.
+
+The native path decisions follow [MuseScore's portable settings implementation](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/settings.cpp),
+[its application data resolver](https://github.com/musescore/MuseScore/blob/v4.7.5/src/framework/global/internal/globalconfiguration.cpp),
+[Qt's Windows known-folder resolver](https://github.com/qt/qtbase/blob/v6.9.3/src/corelib/io/qstandardpaths_win.cpp),
+and [CoreFoundation's fixed-home handling](https://github.com/apple-oss-distributions/CF/blob/main/CFPlatform.c).
+The live platform matrix additionally checks that the ordinary profile remains
+unchanged across startup and shutdown.

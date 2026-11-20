@@ -99,19 +99,41 @@ MCP_SCORE_INTEGRATION=1 pytest tests/integration/test_musescore_bridge.py
 uv run scripts/musescore_harness.py stop
 ```
 
-`start` rewrites MuseScore's user configuration: it installs the plugin,
-replaces `extensions/config.json` (other plugins end up disabled), sets startup
-preferences to suppress first-launch, welcome, and update dialogs, and deletes the saved
-session. Existing shortcuts are preserved. Startup opens the bridge through the
-Plugins menu instead of depending on a custom shortcut. The test profile and
-desktop must use English menu labels.
-Use a throwaway `HOME` on a machine where you use MuseScore yourself.
+`start` uses a marked private profile under the harness cache. Linux redirects
+only the child process's XDG directories. Windows extracts the official portable
+build into that profile and launches its executable directly; it does not install
+an MSI or run the PortableApps launcher. macOS uses `CFFIXED_USER_HOME` and an
+absolute private preferences plist. `HOME` is unchanged. Document, plugin, and
+temporary paths are private as well.
+
+Before configuration writes, startup refuses an existing MuseScore process or
+occupied bridge/display endpoint. The process record stores launched PIDs,
+creation times, and executable identities, including application descendants and
+Xvfb. `stop` terminates only identities that still match that record; it never
+kills applications by name or removes another display's socket. Stale PID records
+do not authorize signaling a reused PID. The profile and desktop must use English
+menu labels.
+
+`stop` retains the private profile and logs for inspection. Collect them before
+removing the profile:
+
+```bash
+uv run scripts/musescore_harness.py collect-logs musescore-logs
+uv run scripts/musescore_harness.py clean
+```
+
+CI snapshots the ordinary application profile after headless rendering, then
+asserts that live harness startup, fixture changes, and cleanup leave it
+unchanged. Startup also verifies current logs and new preference writes in the
+private profile. On macOS it first verifies private native-domain reads and
+Foundation's data-directory resolution, before launching MuseScore.
 
 The harness reads these environment variables:
 
 | Variable                 | Meaning                                                                                                              |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | `MUSESCORE_VERSION`      | Release to install; defaults to the newest in `tests/integration/musescore-versions.json`                            |
+| `MUSESCORE_PROFILE_DIR`  | Optional private test-profile directory; an existing nonempty unowned directory is refused.                          |
 | `MUSESCORE_DOWNLOAD_URL` | Asset to download; otherwise the release is looked up through the GitHub releases API                                |
 | `GITHUB_TOKEN`           | Raises the GitHub API rate limit for that lookup                                                                     |
 | `MUSESCORE_CACHE_DIR`    | Where downloads and the unpacked application live; defaults to `~/.cache/mcp-score/musescore-<version>`              |
