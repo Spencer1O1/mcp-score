@@ -1258,20 +1258,41 @@ def stop(settings: Settings) -> None:
         stop_owned(settings.layout)
 
 
+def unlinked_log_source(source: Path, boundary: Path) -> bool:
+    """Check lexical containment and every ancestor without resolving aliases.
+
+    Walk from the filesystem root downward, rejecting a link before examining
+    any path below it. The boundary itself and its ancestors are checked too.
+    """
+    source, boundary = source.absolute(), boundary.absolute()
+    if not source.is_relative_to(boundary):
+        raise HarnessError("Log source is outside its declared boundary")
+    return not any(
+        component.is_symlink() for component in reversed((source, *source.parents))
+    )
+
+
 def collect_logs(settings: Settings, destination: Path) -> None:
     validate_artifact_boundary(settings.layout)
-    destination.mkdir(parents=True, exist_ok=True)
-    paths = [
-        settings.layout.log_dir,
-        settings.layout.stdout_log,
-        settings.layout.root / "xvfb.log",
-        settings.layout.root / "ownership-diagnostics.json",
-        settings.layout.root / "runner-session-moves.json",
+    root = settings.layout.root
+    # A missing marker is valid when startup failed before profile adoption.
+    # A linked marker cannot authorize reading through an unrelated profile.
+    if not unlinked_log_source(root / PROFILE_MARKER, root):
+        raise HarnessError("Symlinked log profile root, ancestry, or ownership marker")
+    sources = [
+        (settings.layout.log_dir, root),
+        (settings.layout.stdout_log, root),
+        (root / "xvfb.log", root),
+        (root / "ownership-diagnostics.json", root),
+        (root / "runner-session-moves.json", root),
     ]
     if settings.system == "Darwin" and settings.macos_runner_mode:
-        paths.append(require_macos_runner(settings).data_dir / "logs")
-    for path in paths:
-        if path.is_symlink():
+        account = require_macos_runner(settings)
+        sources.append((account.data_dir / "logs", account.data_dir))
+    destination.mkdir(parents=True, exist_ok=True)
+    for path, boundary in sources:
+        if not unlinked_log_source(path, boundary):
+            logger.warning("Skipping linked log source or ancestry: %s", path)
             continue
         if path.is_dir():
             shutil.copytree(

@@ -1225,3 +1225,80 @@ def test_log_collection_skips_symlinks_instead_of_reading_external_targets(
     assert not (destination / "logs/linked-file").exists()
     assert not (destination / "musescore.log").exists()
     assert sentinel.read_text() == "do not copy"
+
+
+def test_log_copy_does_not_follow_linked_data_ancestor(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    outside = tmp_path / "outside"
+    private_logs = outside / "MuseScore/MuseScore4/logs"
+    private_logs.mkdir(parents=True)
+    sentinel = private_logs / "private.txt"
+    sentinel.write_text("unrelated secret")
+    (settings.layout.root / "data").symlink_to(outside, target_is_directory=True)
+    settings.layout.stdout_log.write_text("owned stdout")
+    destination = tmp_path / "collected"
+    harness.collect_logs(settings, destination)
+    assert not (destination / "logs").exists()
+    assert (destination / "musescore.log").read_text() == "owned stdout"
+    assert sentinel.read_text() == "unrelated secret"
+
+
+@pytest.mark.parametrize("link_kind", ["root", "ancestor", "marker"])
+def test_log_copy_refuses_linked_profile_control_ancestry(
+    tmp_path: Path, link_kind: str
+) -> None:
+    settings = make_settings(tmp_path)
+    harness.claim_profile(settings.layout)
+    settings.layout.stdout_log.write_text("do not copy through alias")
+    if link_kind == "marker":
+        marker = settings.layout.root / harness.PROFILE_MARKER
+        marker.unlink()
+        target = tmp_path / "external-marker"
+        target.write_text(harness.PROFILE_MARKER_CONTENT)
+        marker.symlink_to(target)
+    else:
+        target = (
+            settings.layout.root if link_kind == "root" else settings.layout.root.parent
+        )
+        alias = tmp_path / "alias"
+        alias.symlink_to(target, target_is_directory=True)
+        linked_root = (
+            alias if link_kind == "root" else alias / settings.layout.root.name
+        )
+        settings = replace(settings, layout=harness.layout_for("Linux", linked_root))
+    destination = tmp_path / "collected"
+    with pytest.raises(harness.HarnessError, match="Symlinked log profile"):
+        harness.collect_logs(settings, destination)
+    assert not destination.exists()
+
+
+def test_failed_start_log_collection_does_not_adopt_profile(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    settings.layout.root.mkdir(parents=True)
+    settings.layout.stdout_log.write_text("failed before adoption")
+    styles = settings.layout.root / "myStyles"
+    styles.mkdir()
+    external = tmp_path / "bundle"
+    external.mkdir()
+    (styles / "Built-in styles").symlink_to(external, target_is_directory=True)
+    destination = tmp_path / "collected"
+    harness.collect_logs(settings, destination)
+    assert (destination / "musescore.log").read_text() == "failed before adoption"
+    assert not (settings.layout.root / harness.PROFILE_MARKER).exists()
+    assert external.is_dir()
+
+
+def test_hosted_native_log_collection_skips_linked_logs_root(tmp_path: Path) -> None:
+    with hosted_mac(tmp_path) as (settings, account):
+        harness.claim_profile(settings.layout)
+        account.data_dir.mkdir(parents=True)
+        external = tmp_path / "unrelated-logs"
+        external.mkdir()
+        sentinel = external / "private.log"
+        sentinel.write_text("private")
+        (account.data_dir / "logs").symlink_to(external, target_is_directory=True)
+        destination = tmp_path / "collected"
+        harness.collect_logs(settings, destination)
+        assert not (destination / "logs").exists()
+        assert sentinel.read_text() == "private"
