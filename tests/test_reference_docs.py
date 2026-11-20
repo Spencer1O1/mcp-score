@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mcp.types import Tool
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -140,3 +142,33 @@ def test_open_model_renders_a_sentence_instead_of_an_empty_table() -> None:
 
     # Assert
     assert rendered.endswith("Whatever fields the application sends.")
+
+
+def test_nested_request_models_are_included_in_shared_reference_types() -> None:
+    tool = Tool(
+        name="guarded_edit",
+        description="Edit a guarded target.",
+        input_schema={
+            "properties": {"expected": {"$ref": "#/$defs/ExpectedChord"}},
+            "required": ["expected"],
+            "$defs": {
+                "ExpectedChord": {
+                    "title": "ExpectedChord",
+                    "properties": {
+                        "tick": {
+                            "type": "integer",
+                            "description": "Exact expected onset.",
+                        }
+                    },
+                }
+            },
+        },
+    )
+    shared: dict[str, dict[str, object]] = {}
+
+    rendered = generator.render_tool(tool, shared)
+    reference_types = generator.render_result_types(shared)
+
+    assert "`ExpectedChord`" in rendered
+    assert "### `ExpectedChord`" in reference_types
+    assert "Exact expected onset." in reference_types

@@ -259,9 +259,9 @@ of the selected items as they come from its API.
 
 Manipulation tools: change the score in the connected application.
 
-Every tool that takes a measure moves there first and refuses to continue
-if the application cannot get there, so a change never lands in the wrong
-place. What an application cannot do comes back as its own explanation:
+Legacy edits navigate to a measure first. Guarded pitch edits instead resolve
+an explicit position and validate its expected contents atomically in the plugin.
+Unsupported operations return the application's own explanation:
 Dorico's Remote Control API triggers commands but cannot type into
 popovers or move the selection, so most of these tools work with MuseScore
 only.
@@ -290,6 +290,47 @@ available with Dorico.
 | `staff`    | `int`      | Staff index (0-indexed).    |
 | `pitch`    | `int`      |                             |
 | `duration` | `Duration` |                             |
+
+### `set_live_note_pitch`
+
+Match a live chord snapshot and change one tone's concert pitch and spelling.
+
+Pass the complete chord event from a fresh live read as `expected`, including
+every tone's written_tpc. The plugin checks the onset, track, rhythm, pitches,
+and spellings in the same synchronous handler as the edit. A mismatch rejects
+the edit without opening an undo step. Successful edits return actual native
+before/after events and create one undo step; no-op requests create none.
+Chord-tone indices belong only to that snapshot, not to later reads.
+
+This guards only the target chord, not a score identity or global revision;
+switching to another score with identical target contents is not detected.
+Tied, grace, tuplet, drum, tablature, duplicate-tone and microtonal targets are
+rejected. Written octave is not returned. Not available with Dorico.
+
+| Parameter    | Type                | Default    | Description                                                         |
+| ------------ | ------------------- | ---------- | ------------------------------------------------------------------- |
+| `measure`    | `int`               | (required) | Ordinal measure (1-indexed, repeats not expanded).                  |
+| `staff`      | `int`               | (required) | Explicit staff index (0-indexed).                                   |
+| `voice`      | `int`               | (required) | Explicit voice index (0-3).                                         |
+| `offset`     | `WholeNoteFraction` | (required) | Exact onset within the measure, as a whole-note fraction.           |
+| `note_index` | `int`               | (required) | Tone index in expected.notes (0-indexed, snapshot-local).           |
+| `pitch`      | `int`               | (required) | Replacement sounding MIDI pitch (0-127; 60 is middle C).            |
+| `tpc`        | `int`               | (required) | Replacement concert tonal pitch class (-1 to 33); must match pitch. |
+| `expected`   | `ExpectedChord`     | (required) | Complete live chord event, with written_tpc for every tone.         |
+
+**Returns** `PitchEdit`: Actual before/after notation, read inside the synchronous edit handler.
+
+| Field               | Type                       | Description                                                               |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| `measure`           | `int`                      |                                                                           |
+| `note_index_before` | `int`                      | Ephemeral chord-tone index in the required expected snapshot.             |
+| `note_index_after`  | `int`                      | Index after editing; a later operation must take a fresh snapshot.        |
+| `before`            | `PassageEvent`             |                                                                           |
+| `after`             | `PassageEvent`             |                                                                           |
+| `verified`          | `bool`                     |                                                                           |
+| `mutation_status`   | `"applied" \| "unchanged"` |                                                                           |
+| `snapshot_scope`    | `str`                      |                                                                           |
+| `limitations`       | `list[str]`                | Target matching does not establish application-wide identity or revision. |
 
 ### `add_live_rehearsal_mark`
 
@@ -573,7 +614,7 @@ environment.
 | `format`       | `str`         |                                                                          |
 | `warning`      | `str \| None` | Set when MuseScore wrote the output but did not exit cleanly afterwards. |
 
-## Result types
+## Shared input and result types
 
 ### `ApplicationReply`
 
@@ -628,6 +669,33 @@ A rhythmic event onset and optional chord-tone index in one read.
 | `offset_numerator`   | `int`         | Numerator of the exact onset offset as a fraction of a whole note.     |
 | `offset_denominator` | `int`         | Denominator of the whole-note onset offset.                            |
 | `note_index`         | `int \| None` | Index into this read's chord tones; omitted to select the whole event. |
+
+### `ExpectedChord`
+
+A complete, strictly typed target snapshot from a fresh live read.
+
+| Field             | Type                      | Description |
+| ----------------- | ------------------------- | ----------- |
+| `kind`            | `str`                     |             |
+| `type`            | `int`                     |             |
+| `staff`           | `int`                     |             |
+| `voice`           | `int`                     |             |
+| `tick`            | `int`                     |             |
+| `offset`          | `WholeNoteFraction`       |             |
+| `duration`        | `WholeNoteFraction`       |             |
+| `actual_duration` | `WholeNoteFraction`       |             |
+| `notes`           | `list[ExpectedPitchNote]` |             |
+| `text`            | `str \| None`             |             |
+
+### `ExpectedPitchNote`
+
+| Field           | Type  | Description |
+| --------------- | ----- | ----------- |
+| `pitch`         | `int` |             |
+| `tpc`           | `int` |             |
+| `written_tpc`   | `int` |             |
+| `displayed_tpc` | `int` |             |
+| `name`          | `str` |             |
 
 ### `MuseScoreDiagnostics`
 
@@ -690,14 +758,24 @@ One measure across the requested staves and voices.
 
 A chord tone, with concert pitch spelling independent of display mode.
 
-| Field           | Type  | Description                                                           |
-| --------------- | ----- | --------------------------------------------------------------------- |
-| `pitch`         | `int` | Sounding MIDI pitch; 60 is middle C.                                  |
-| `tpc`           | `int` | Concert tonal pitch class (MuseScore tpc1).                           |
-| `name`          | `str` | Concert spelling and octave, for example C#4 or Db4.                  |
-| `displayed_tpc` | `int` | TPC in the current concert/transposed display mode; not a MIDI pitch. |
+| Field           | Type          | Description                                                           |
+| --------------- | ------------- | --------------------------------------------------------------------- |
+| `pitch`         | `int`         | Sounding MIDI pitch; 60 is middle C.                                  |
+| `tpc`           | `int`         | Concert tonal pitch class (MuseScore tpc1).                           |
+| `name`          | `str`         | Concert spelling and octave, for example C#4 or Db4.                  |
+| `written_tpc`   | `int \| None` | Written TPC (tpc2), without octave; null on older plugins.            |
+| `displayed_tpc` | `int`         | TPC in the current concert/transposed display mode; not a MIDI pitch. |
 
 ### `TimeSignature`
+
+| Field         | Type  | Description |
+| ------------- | ----- | ----------- |
+| `numerator`   | `int` |             |
+| `denominator` | `int` |             |
+
+### `WholeNoteFraction`
+
+An exact nonnegative request fraction; numeric coercion is forbidden.
 
 | Field         | Type  | Description |
 | ------------- | ----- | ----------- |

@@ -92,6 +92,16 @@ jobs:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
 
+      - name: Start guarded pitch fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Guarded pitch tests (live plugin)
+        env:
+          MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_pitch.py -v
+
       - name: Stop only owned MuseScore and display processes
         if: always()
         run: uv run scripts/musescore_harness.py stop
@@ -166,6 +176,16 @@ jobs:
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
+
+      - name: Start guarded pitch fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Guarded pitch tests (live plugin)
+        env:
+          MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_pitch.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()
@@ -243,6 +263,16 @@ jobs:
         env:
           MCP_SCORE_PASSAGE_FIXTURE: "1"
         run: uv run pytest tests/integration/test_musescore_passage.py -v
+
+      - name: Start guarded pitch fixture
+        run: |
+          uv run scripts/musescore_harness.py stop
+          uv run scripts/musescore_harness.py start tests/integration/fixtures/guarded-pitch.musicxml
+
+      - name: Guarded pitch tests (live plugin)
+        env:
+          MCP_SCORE_GUARDED_PITCH_FIXTURE: "1"
+        run: uv run pytest tests/integration/test_musescore_pitch.py -v
 
       - name: Stop only owned MuseScore and display processes
         if: always()

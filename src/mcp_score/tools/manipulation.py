@@ -1,8 +1,8 @@
 """Manipulation tools: change the score in the connected application.
 
-Every tool that takes a measure moves there first and refuses to continue
-if the application cannot get there, so a change never lands in the wrong
-place. What an application cannot do comes back as its own explanation:
+Legacy edits navigate to a measure first. Guarded pitch edits instead resolve
+an explicit position and validate its expected contents atomically in the plugin.
+Unsupported operations return the application's own explanation:
 Dorico's Remote Control API triggers commands but cannot type into
 popovers or move the selection, so most of these tools work with MuseScore
 only.
@@ -12,6 +12,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import StrictInt, ValidationError
+
+from mcp_score.bridge.pitch import (
+    ExpectedChord,
+    PitchEdit,
+    PitchEditRequest,
+    WholeNoteFraction,
+)
 from mcp_score.bridge.results import (
     BarlineSet,
     ChordSymbolAdded,
@@ -76,6 +84,70 @@ async def add_live_note(
     await navigate(bridge, measure, staff)
     return await bridge.add_note(
         pitch, Duration(numerator=numerator, denominator=denominator)
+    )
+
+
+@score_tool
+async def set_live_note_pitch(
+    context: ScoreContext,
+    measure: StrictInt,
+    staff: StrictInt,
+    voice: StrictInt,
+    offset: WholeNoteFraction,
+    note_index: StrictInt,
+    pitch: StrictInt,
+    tpc: StrictInt,
+    expected: ExpectedChord,
+) -> PitchEdit:
+    """Match a live chord snapshot and change one tone's concert pitch and spelling.
+
+    Pass the complete chord event from a fresh live read as `expected`, including
+    every tone's written_tpc. The plugin checks the onset, track, rhythm, pitches,
+    and spellings in the same synchronous handler as the edit. A mismatch rejects
+    the edit without opening an undo step. Successful edits return actual native
+    before/after events and create one undo step; no-op requests create none.
+    Chord-tone indices belong only to that snapshot, not to later reads.
+
+    This guards only the target chord, not a score identity or global revision;
+    switching to another score with identical target contents is not detected.
+    Tied, grace, tuplet, drum, tablature, duplicate-tone and microtonal targets are
+    rejected. Written octave is not returned. Not available with Dorico.
+
+    Args:
+        measure: Ordinal measure (1-indexed, repeats not expanded).
+        staff: Explicit staff index (0-indexed).
+        voice: Explicit voice index (0-3).
+        offset: Exact onset within the measure, as a whole-note fraction.
+        note_index: Tone index in expected.notes (0-indexed, snapshot-local).
+        pitch: Replacement sounding MIDI pitch (0-127; 60 is middle C).
+        tpc: Replacement concert tonal pitch class (-1 to 33); must match pitch.
+        expected: Complete live chord event, with written_tpc for every tone.
+    """
+    bridge = require_bridge(context)
+    try:
+        request = PitchEditRequest.model_validate(
+            {
+                "measure": measure,
+                "staff": staff,
+                "voice": voice,
+                "offset": offset.model_dump(),
+                "note_index": note_index,
+                "pitch": pitch,
+                "tpc": tpc,
+                "expected": expected.model_dump(),
+            }
+        )
+    except ValidationError as error:
+        raise ToolError(f"Invalid guarded pitch request: {error}") from error
+    return await bridge.set_note_pitch(
+        request.measure,
+        request.staff,
+        request.voice,
+        request.offset,
+        request.note_index,
+        request.pitch,
+        request.tpc,
+        request.expected,
     )
 
 
@@ -273,6 +345,7 @@ async def undo_last_action(context: ScoreContext) -> CursorPosition:
 def register(server: MCPServer) -> None:
     for tool in (
         add_live_note,
+        set_live_note_pitch,
         add_live_rehearsal_mark,
         add_live_chord_symbol,
         add_live_dynamic,
