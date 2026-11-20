@@ -30,12 +30,18 @@ function getScore(plugin, params) {
 
     var keySig = (cursor.keySignature !== undefined) ? cursor.keySignature : null;
 
+    // Nominal meter retains notation (4/4 vs 2/2), unlike reduced actual
+    // duration, which also differs from the meter for pickup measures.
+    var opening = curScore.firstMeasure;
+    var nominal = opening ? opening.timesigNominal : null;
     var timeSig = null;
-    if (cursor.timeSignature) {
-        timeSig = {
-            numerator: cursor.timeSignature.numerator,
-            denominator: cursor.timeSignature.denominator
-        };
+    if (nominal && typeof nominal.numerator === "number"
+            && isFinite(nominal.numerator) && nominal.numerator > 0
+            && Math.floor(nominal.numerator) === nominal.numerator
+            && typeof nominal.denominator === "number"
+            && isFinite(nominal.denominator) && nominal.denominator > 0
+            && Math.floor(nominal.denominator) === nominal.denominator) {
+        timeSig = {numerator: nominal.numerator, denominator: nominal.denominator};
     }
 
     return {

@@ -22,7 +22,7 @@ import pytest
 from mcp_score.bridge import BridgeError
 from mcp_score.bridge.musescore import MuseScoreBridge
 from mcp_score.bridge.pitch import ExpectedChord
-from mcp_score.bridge.results import BarlineSet, Duration, Note
+from mcp_score.bridge.results import BarlineSet, Duration, Note, TimeSignature
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -96,6 +96,7 @@ class TestMuseScoreBridgeReadsFixture:
         assert score.part_count == _FIXTURE_PART_COUNT
         assert len(score.parts) == _FIXTURE_PART_COUNT
         assert score.measure_count == _FIXTURE_MEASURE_COUNT
+        assert score.time_signature == TimeSignature(numerator=4, denominator=4)
 
     @pytest.mark.anyio()
     async def test_go_to_measure_out_of_range_raises(self) -> None:
