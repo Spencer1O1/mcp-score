@@ -246,3 +246,50 @@ def test_valid_scalar_boundaries_and_entities_remain_literal(text: str) -> None:
     observed = _run("params.plainText=" + json.dumps(text) + ";")
     result = LyricTextEdit.model_validate(_snake_case_keys(observed["reply"]["result"]))
     assert result.selected_after.plain_text == text
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "undefined",
+        "'unknown'",
+        "'101'",
+        "null",
+        "false",
+        "0",
+        "-1",
+        "0.5",
+        "NaN",
+        "Infinity",
+        "9007199254740992",
+    ],
+)
+def test_unknown_enum_and_matching_native_type_cannot_establish_lyric_identity(
+    value: str,
+) -> None:
+    observed = _run(
+        "plugin.Element.LYRICS=" + value + ";lyric.type=" + value + ";"
+        "params.expected=snapshot()[0];"
+    )
+    assert observed["reply"]["code"] == "unsupported_native_api"
+    assert observed["reply"]["mutation_status"] == "not_applied"
+    assert observed["starts"] == observed["cancels"] == observed["lyricWrites"] == 0
+    assert observed["history"] == ["prior"] and observed["text"] == "keep chord"
+
+
+@pytest.mark.parametrize(
+    "value", ["undefined", "'unknown'", "'101'", "null", "false", "0", "-1", "101.5"]
+)
+def test_unknown_selected_or_surviving_lyric_type_rejects_before_write(
+    value: str,
+) -> None:
+    for selected in (True, False):
+        change = (
+            "lyric.type=" + value + ";"
+            if selected
+            else ("current.lyrics.push({...lyric,verse:1,type:" + value + "});")
+        )
+        observed = _run(change + "params.expected=snapshot()[0];")
+        assert observed["reply"]["mutation_status"] == "not_applied"
+        assert observed["starts"] == observed["cancels"] == observed["lyricWrites"] == 0
+        assert observed["history"] == ["prior"] and observed["text"] == "keep chord"

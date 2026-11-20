@@ -1,7 +1,13 @@
 const { LyricText, Receipts, LyricTextFixture } = modules;
 current = chord(1920);
 let text = "keep chord";
-const lyricControls = { ignore: false, fail: false, style: false, peer: false };
+const lyricControls = {
+    ignore: false,
+    fail: false,
+    style: false,
+    peer: false,
+    writes: 0,
+};
 const lyric = {
     type: 101,
     verse: 0,
@@ -34,6 +40,7 @@ const lyric = {
         return text;
     },
     set text(value) {
+        lyricControls.writes++;
         if (lyricControls.fail) throw Error("text setter failed");
         if (lyricControls.ignore) return;
         text = value;
@@ -83,5 +90,6 @@ function runLyric() {
         history,
         cursor: [plugin.cursorMeasure, plugin.cursorStaff, plugin.cursorVoice],
         text,
+        lyricWrites: lyricControls.writes,
     };
 }

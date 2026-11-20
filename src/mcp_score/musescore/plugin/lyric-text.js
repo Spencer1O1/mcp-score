@@ -62,11 +62,15 @@ function spans(plugin) {
 function requireField(valid,name) {
     if (!valid) throw Error("Unsupported native lyric field: "+name);
 }
+function knownLyricType(plugin,lyric) {
+    return plugin.Element && Pitch.integer(plugin.Element.LYRICS) && plugin.Element.LYRICS>0
+        && lyric && Pitch.integer(lyric.type) && lyric.type===plugin.Element.LYRICS;
+}
 function capture(plugin,lyric) {
+    requireField(knownLyricType(plugin,lyric),"type");
     // Validate native UTF-16 before its parser, which assumes paired surrogates.
     var xml=lyric.text;
     requireField(validText(xml,3072),"text (XML scalars/size)");
-    requireField(lyric.type===plugin.Element.LYRICS,"type");
     var plain=lyric.plainText;
     requireField(validText(plain),"plainText (scalars/size)");
     requireField(xml===encode(plain),"text (noncanonical/rich XML)");
@@ -117,6 +121,7 @@ function read(plugin,params) {
     var identities={};
     for (var index=0;index<list.length;index++) {
         var lyric=list[index];
+        requireField(knownLyricType(plugin,lyric),"lyrics["+index+"].type");
         if (!Pitch.integer(lyric.verse) || !Pitch.integer(lyric.placement)) throw Error("Unknown lyric identity");
         var key=lyric.verse+":"+lyric.placement;
         if (Object.prototype.hasOwnProperty.call(identities,key)) throw Error("Duplicate verse/placement lyric identity");
@@ -156,6 +161,7 @@ function setLyricText(plugin,params) {
     var scoreError=Score.requireScore(plugin);
     if (scoreError) return failure(params,"target_unavailable",scoreError.error,"not_applied",null,null);
     if (plugin.mscoreMajorVersion!==4 || !Pitch.integer(plugin.mscoreMinorVersion) || plugin.mscoreMinorVersion<7
+            || !plugin.Element || !Pitch.integer(plugin.Element.LYRICS) || plugin.Element.LYRICS<=0
             || !plugin.Lyrics || !Pitch.integer(plugin.Lyrics.SINGLE) || !plugin.Placement
             || !Pitch.integer(plugin.Placement.ABOVE) || !Pitch.integer(plugin.Placement.BELOW)) {
         return failure(params,"unsupported_native_api","Requires MuseScore4.7+ dedicated lyric metadata","not_applied",null,null);
