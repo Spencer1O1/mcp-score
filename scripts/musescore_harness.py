@@ -648,6 +648,70 @@ def _install_chord_tone_fixture(layout: Layout) -> None:
     qml.write_text(qml_text)
 
 
+def _install_note_rest_fixture(layout: Layout) -> None:
+    """Inject fixed post-rewrite failures only into the marked disposable copy."""
+    validate_artifact_boundary(layout)
+    marker = layout.root / PROFILE_MARKER
+    if (
+        not unlinked_log_source(marker, layout.root)
+        or not marker.is_file()
+        or marker.read_text() != PROFILE_MARKER_CONTENT
+    ):
+        raise HarnessError("Note/rest fixture requires a marked owned profile")
+    directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+    qml, module = directory / PLUGIN_QML_NAME, directory / "rhythm.js"
+    driver = directory / "note-rest-fixture.js"
+    source = REPOSITORY_ROOT / "tests/integration/plugin/note-rest-fixture.js"
+    if not all(
+        unlinked_log_source(path, layout.root) for path in (qml, module, driver)
+    ):
+        raise HarnessError("Refusing a linked note/rest fixture destination")
+    if not unlinked_log_source(source, REPOSITORY_ROOT) or not source.is_file():
+        raise HarnessError("Refusing a linked or missing note/rest fixture source")
+    qml_text, module_text = qml.read_text(), module.read_text()
+    qml_replacements = {
+        'import "rhythm.js" as Rhythm': (
+            'import "rhythm.js" as Rhythm\n'
+            'import "note-rest-fixture.js" as NoteRestFixture'
+        ),
+        "property var receiptState: null": (
+            "property var receiptState: null\n    property var noteRestFault: null"
+        ),
+        '"replaceNoteWithRest":  Rhythm.replaceNoteWithRest,': (
+            '"replaceNoteWithRest":  Rhythm.replaceNoteWithRest,\n'
+            '        "_testArmRestFill": NoteRestFixture.armFill,\n'
+            '        "_testArmNoteRest": NoteRestFixture.armReplace,\n'
+            '        "_testReadNoteRestFault": NoteRestFixture.read,'
+        ),
+    }
+    module_replacements = {
+        '.import "score.js" as Score': (
+            '.import "score.js" as Score\n'
+            '.import "note-rest-fixture.js" as NoteRestFixture'
+        ),
+        "cursor.addNote(params.pitch,false);": (
+            "cursor.addNote(params.pitch,false);\n"
+            '            NoteRestFixture.capture(plugin,params,"fill");'
+        ),
+        "cursor.addRest();": (
+            "cursor.addRest();\n"
+            '            NoteRestFixture.capture(plugin,params,"replace");'
+        ),
+    }
+    if any(qml_text.count(value) != 1 for value in qml_replacements) or any(
+        module_text.count(value) != 1 for value in module_replacements
+    ):
+        raise HarnessError("Note/rest fixture sentinel is missing or ambiguous")
+    driver_text = source.read_text()
+    for value, replacement in qml_replacements.items():
+        qml_text = qml_text.replace(value, replacement)
+    for value, replacement in module_replacements.items():
+        module_text = module_text.replace(value, replacement)
+    driver.write_text(driver_text)
+    module.write_text(module_text)
+    qml.write_text(qml_text)
+
+
 def child_environment(settings: Settings) -> dict[str, str]:
     """Isolate child-process application paths without changing HOME."""
     root = settings.layout.root
@@ -1343,6 +1407,8 @@ def start(settings: Settings, score: Path) -> None:
             _install_pitch_batch_fixture(settings.layout)
         if os.environ.get("MUSESCORE_CHORD_TONE_TEST_SETUP") == "1":
             _install_chord_tone_fixture(settings.layout)
+        if os.environ.get("MUSESCORE_NOTE_REST_TEST_SETUP") == "1":
+            _install_note_rest_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)

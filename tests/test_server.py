@@ -46,6 +46,8 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         # manipulation
         "add_live_note",
         "add_live_chord_tone",
+        "fill_live_rest",
+        "replace_live_note_with_rest",
         "remove_live_chord_tone",
         "set_live_note_pitch",
         "set_live_note_pitches",

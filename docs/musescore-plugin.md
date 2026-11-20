@@ -586,6 +586,72 @@ execution. Normal raw/legacy mutations remain outside this duplicate guarantee.
 | ------- | ------ | ------------------------------------------------------------- |
 | `undo`  | none   | Undo the last action; reports the cursor position afterwards. |
 
+### Guarded rest and single-note replacement
+
+`fill_live_rest` (`fillRestWithNote`) replaces the onset of an existing plain
+rest with one pitched note. `replace_live_note_with_rest`
+(`replaceNoteWithRest`) replaces one ordinary single-tone chord with an
+equal-duration rest coverage (native rhythmic decomposition may split rests).
+Neither operation shifts later events or opens occupied
+time. Supply explicit measure/staff/voice/exact offset and the **entire fresh
+voice-measure event list** as `expected`; fill also requires concert MIDI
+`pitch`, concert `tpc`, and a requested `duration`. A stale snapshot rejects
+inside the same synchronous handler before any mutation.
+
+Native support requires MuseScore 4.7+ in major version 4. Requested note
+values are undotted whole through 32nd and must fit within both the original
+rest's actual span and its bar. Ordinary regular 4/4 full-measure rests are
+supported; pickup/irregular full-measure rests and dotted target rests reject.
+Native trailing rests may be split or dotted. Verification requires a plain,
+undecorated, contiguous suffix whose exact union fills the original remainder.
+This is bounded replacement, not general insertion, deletion of occupied time,
+or passage rewriting. EDIT-2/EDIT-3 remain partial.
+
+The handler constructs an independent input cursor with only the native
+ChordRest filter, verifies the existing segment/track/element identities, and
+uses `addNote` or `addRest`. It never selects a target, enables TimeTick anchors,
+uses `setStaff`, removes an element through global delete commands, or toggles
+concert-pitch mode. Native note input accepts concert MIDI directly. Written
+TPC is computed from the exact native written-to-concert chromatic/diatonic
+interval and assigned explicitly alongside concert TPC; written octaves are not
+inferred. Both range and MIDI/TPC congruence are checked before opening undo.
+
+Targets require unit time stretch, a pitched non-drum/non-tab staff and known
+native eligibility metadata. Attachments (including lyrics/articulations),
+beams, grace notes, ties, tuplets, tremolo, microtonality, unknown annotations,
+and intersecting or unlocatable score spanners reject. Replacement of a
+multi-tone chord is handled by the separate guarded chord-tone tools. Reads
+before and after cover all tracks of the measure, exposed staff context,
+adjacent measure events and the exposed metadata of every score spanner.
+Verification covers these exposed fields, not all engraving properties or a
+score-instance/global-revision guarantee. Switching to identical contents in
+another score cannot be detected.
+
+One known open native command owns the replacement. Structural rewriting and
+cancellation always re-resolve fresh native wrappers. A failed write cancels
+only that known open command, and reports `rolled_back` only after fresh
+read-back proves the exposed original state restored. Commit uncertainty stays
+`unknown`; known committed changes with failed read-back report
+`applied_unverified`. No global undo or replay is used. Success returns actual
+all-track `before` and `after` events with `verified: true`. UI selection and
+layout may change (`selection_status: not_preserved`); the bridge's logical
+position is untouched. These commands are top-level only and have no mutation
+receipt support; never resend them blindly after a lost response.
+
+Disposable CI fixtures cover normal and concert-score display modes, ordinary
+and full-measure rests, a second voice, Bb and octave transposition, peer
+preservation and one-step undo. A separately opted-in, marked installed copy
+injects fixed failures immediately after each native replacement, observes
+fresh primitive rewritten events, and verifies cancellation plus preservation
+of a prior observable undo entry. Packaged production code has no fault driver
+or test command. Older native versions actively prove unsupported responses.
+
+Native source contracts:
+[Cursor positioning and input](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/api/v1/cursor.cpp),
+[concert MIDI and TPC initialization](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/dom/note.cpp),
+[rest entry](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/editing/edit.cpp),
+and [replacement/rest splitting](https://github.com/musescore/MuseScore/blob/v4.7.5/src/engraving/editing/cmd.cpp).
+
 ### Guarded duration changes
 
 `set_live_event_duration` defaults to `policy: shorten_fill_rest`. It sends the

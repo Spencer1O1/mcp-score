@@ -28,6 +28,7 @@ import "pitch.js" as Pitch
 import "pitch-batch.js" as PitchBatch
 import "chord-tone.js" as ChordTone
 import "duration.js" as DurationEdit
+import "rhythm.js" as Rhythm
 import "selection.js" as Selection
 import "sequence.js" as Sequence
 import "protocol.js" as Protocol
@@ -81,6 +82,8 @@ MuseScore {
         "removeChordTone":      ChordTone.removeChordTone,
         "setEventDuration":     DurationEdit.setEventDuration,
         "extendEventDuration":  DurationEdit.extendEventDuration,
+        "fillRestWithNote":     Rhythm.fillRestWithNote,
+        "replaceNoteWithRest":  Rhythm.replaceNoteWithRest,
         "addRehearsalMark":     Editing.addRehearsalMark,
         "setBarline":           Editing.setBarline,
         "setKeySignature":      Editing.setKeySignature,
