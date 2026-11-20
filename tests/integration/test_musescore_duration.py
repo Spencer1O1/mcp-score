@@ -263,7 +263,9 @@ async def test_native_extension_consumes_only_complete_rests_then_single_undo(
                 and event.kind == "chord"
             )
             assert changed.duration == changed.actual_duration == desired
-            assert changed.notes == target.notes
+            assert [note.model_dump() for note in changed.notes] == [
+                note.model_dump() for note in target.notes
+            ]
             assert not [
                 event
                 for event in result.after
@@ -297,10 +299,13 @@ async def test_native_extension_consumes_only_complete_rests_then_single_undo(
         cursor_after = await bridge.get_cursor_info()
         assert cursor_after == cursor_before
     finally:
-        if applied:
-            await bridge.undo()
-        restored = await bridge.read_passage(4, 4)
-        await bridge.disconnect()
+        try:
+            if applied:
+                applied = False
+                await bridge.undo()
+            restored = await bridge.read_passage(4, 4)
+        finally:
+            await bridge.disconnect()
     assert restored == before
 
 
