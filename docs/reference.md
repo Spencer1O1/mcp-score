@@ -376,6 +376,39 @@ rejected. Written octave is not returned. Not available with Dorico.
 | `snapshot_scope`    | `str`                      |                                                                           |
 | `limitations`       | `list[str]`                | Target matching does not establish application-wide identity or revision. |
 
+### `set_live_note_pitches`
+
+Preflight up to 32 independent chord targets, then edit in one undo command.
+
+Every target uses the existing strict guarded pitch request and a complete
+fresh chord snapshot. Chords must be distinct, even for different tone
+indices or equivalent onset fractions. All snapshots, spelling and native
+eligibility are checked before any write. No navigation or dependent steps.
+An all-no-op batch creates no undo command. Writes verify actual target
+pitches, peers, rhythm and fresh exposed metadata, including lyrics and
+articulations. Expected attachment metadata remains informational.
+Only a known open command can be cancelled; rolled_back requires re-reading
+ALL exposed target snapshots. Commit uncertainty is unknown; postcommit
+failures are applied_unverified. Global undo is never invoked automatically.
+Scope is target chords, not score identity/revision or non-target contents.
+No automatic mutation replay. Use execute_mutation_once with kind
+set_note_pitches for caller-retained duplicate protection; this direct tool
+has none. Not available with Dorico or an older plugin lacking setNotePitches.
+
+| Parameter | Type                     | Default    | Description                                                     |
+| --------- | ------------------------ | ---------- | --------------------------------------------------------------- |
+| `edits`   | `list[PitchEditRequest]` | (required) | One through 32 strict pitch requests targeting distinct chords. |
+
+**Returns** `PitchBatchEdit`: Actual native snapshots for every target, in request order.
+
+| Field             | Type                       | Description |
+| ----------------- | -------------------------- | ----------- |
+| `edits`           | `list[PitchEdit]`          |             |
+| `verified`        | `bool`                     |             |
+| `mutation_status` | `"applied" \| "unchanged"` |             |
+| `snapshot_scope`  | `str`                      |             |
+| `limitations`     | `list[str]`                |             |
+
 ### `set_live_event_duration`
 
 Shorten an ordinary live chord and fill its released time with rests.
@@ -612,7 +645,7 @@ Execute explicitly identified guarded mutations and retrieve their history.
 
 ### `execute_mutation_once`
 
-Execute one guarded pitch request with a caller-retained operation ID.
+Execute one guarded pitch request or batch with a caller-retained ID.
 
 Create and retain a unique operation_id BEFORE the first call. Obtain the
 plugin session from connect_to_musescore/get_musescore_bridge_info. Repeating
@@ -620,7 +653,8 @@ the identical ID, session and complete payload returns retained history;
 changing the payload conflicts. This command is never automatically replayed.
 After a lost response or cancellation, explicitly retry the exact request or
 read its receipt. Never replace the session token automatically after restart.
-Only set_note_pitch is supported; legacy mutation tools are not protected.
+Only set_note_pitch and set_note_pitches are supported; legacy mutation
+tools are not protected. Batch targets must be distinct chords, at most 32.
 
 Receipt completion means an original native reply was retained, including
 errors; it does not mean the edit succeeded. Replies are HISTORICAL, including
@@ -628,11 +662,11 @@ after undo or further edits, and are not verification of current score state.
 Pending/unknown IDs remain reserved. The bounded non-evicting ledger lasts
 only for that plugin instance. Native score identity is not established.
 
-| Parameter                 | Type                   | Default    | Description |
-| ------------------------- | ---------------------- | ---------- | ----------- |
-| `operation_id`            | `str`                  | (required) |             |
-| `expected_plugin_session` | `str`                  | (required) |             |
-| `mutation`                | `GuardedPitchMutation` | (required) |             |
+| Parameter                 | Type                                                | Default    | Description |
+| ------------------------- | --------------------------------------------------- | ---------- | ----------- |
+| `operation_id`            | `str`                                               | (required) |             |
+| `expected_plugin_session` | `str`                                               | (required) |             |
+| `mutation`                | `GuardedPitchMutation \| GuardedPitchBatchMutation` | (required) |             |
 
 **Returns** `MutationReceipt`: Retained operation history, never a verification of the current score.
 
@@ -641,7 +675,7 @@ only for that plugin instance. Native score identity is not established.
 | `plugin_session` | `str`                                                  |                                                                              |
 | `operation_id`   | `str`                                                  |                                                                              |
 | `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
-| `command`        | `str \| None`                                          |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| None`           |                                                                              |
 | `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
 | `historical`     | `bool`                                                 |                                                                              |
 | `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
@@ -669,7 +703,7 @@ a mutation and remains available when the non-evicting ledger is full.
 | `plugin_session` | `str`                                                  |                                                                              |
 | `operation_id`   | `str`                                                  |                                                                              |
 | `status`         | `"not_found" \| "pending" \| "completed" \| "unknown"` |                                                                              |
-| `command`        | `str \| None`                                          |                                                                              |
+| `command`        | `"setNotePitch" \| "setNotePitches" \| None`           |                                                                              |
 | `cached`         | `bool`                                                 | Lookup/retrieval response, not proof that an operation completed or applied. |
 | `historical`     | `bool`                                                 |                                                                              |
 | `original_reply` | `dict \| None`                                         | Original native JSON fields, including errors, preserved in native casing.   |
@@ -875,6 +909,13 @@ Every event in the fresh target voice's complete measure read.
 | `displayed_tpc` | `int` |             |
 | `name`          | `str` |             |
 
+### `GuardedPitchBatchMutation`
+
+| Field     | Type                | Description |
+| --------- | ------------------- | ----------- |
+| `kind`    | `str`               |             |
+| `request` | `PitchBatchRequest` |             |
+
 ### `GuardedPitchMutation`
 
 | Field     | Type               | Description |
@@ -984,6 +1025,30 @@ A chord tone, with concert pitch spelling independent of display mode.
 | `name`          | `str`         | Concert spelling and octave, for example C#4 or Db4.                  |
 | `written_tpc`   | `int \| None` | Written TPC (tpc2), without octave; null on older plugins.            |
 | `displayed_tpc` | `int`         | TPC in the current concert/transposed display mode; not a MIDI pitch. |
+
+### `PitchBatchRequest`
+
+Independent targets; the native handler also rejects aliased chord objects.
+
+| Field   | Type                     | Description |
+| ------- | ------------------------ | ----------- |
+| `edits` | `list[PitchEditRequest]` |             |
+
+### `PitchEdit`
+
+Actual before/after notation, read inside the synchronous edit handler.
+
+| Field               | Type                       | Description                                                               |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| `measure`           | `int`                      |                                                                           |
+| `note_index_before` | `int`                      | Ephemeral chord-tone index in the required expected snapshot.             |
+| `note_index_after`  | `int`                      | Index after editing; a later operation must take a fresh snapshot.        |
+| `before`            | `PassageEvent`             |                                                                           |
+| `after`             | `PassageEvent`             |                                                                           |
+| `verified`          | `bool`                     |                                                                           |
+| `mutation_status`   | `"applied" \| "unchanged"` |                                                                           |
+| `snapshot_scope`    | `str`                      |                                                                           |
+| `limitations`       | `list[str]`                | Target matching does not establish application-wide identity or revision. |
 
 ### `PitchEditRequest`
 

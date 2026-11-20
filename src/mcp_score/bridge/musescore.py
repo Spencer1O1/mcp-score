@@ -25,6 +25,7 @@ from mcp_score.bridge.current_selection import CurrentSelection
 from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
 from mcp_score.bridge.passage import Passage
 from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
+from mcp_score.bridge.pitch_batch import PitchBatchEdit, PitchBatchRequest
 from mcp_score.bridge.receipts import (
     RECEIPT_PROTOCOL_VERSION,
     MutationReceipt,
@@ -83,6 +84,7 @@ class MuseScoreCommand(StrEnum):
     GO_TO_STAFF = "goToStaff"
     ADD_NOTE = "addNote"
     SET_NOTE_PITCH = "setNotePitch"
+    SET_NOTE_PITCHES = "setNotePitches"
     SET_EVENT_DURATION = "setEventDuration"
     ADD_REHEARSAL_MARK = "addRehearsalMark"
     ADD_CHORD_SYMBOL = "addChordSymbol"
@@ -207,13 +209,23 @@ class MuseScoreBridge(WebSocketBridge):
                     this_attempt_status="not_sent",
                     prior_outcome="not_established",
                 )
-            if (
-                action == MuseScoreCommand.EXECUTE_MUTATION_ONCE
-                and "setNotePitch" not in receipt.supported_mutations
-            ):
-                raise BridgeError(
-                    "Plugin does not support receipted guarded pitch mutations."
+            if action == MuseScoreCommand.EXECUTE_MUTATION_ONCE:
+                mutation = cast("dict[str, Any]", params).get("mutation")
+                kind: object = (
+                    cast("dict[str, Any]", mutation).get("kind")
+                    if isinstance(mutation, dict)
+                    else None
                 )
+                commands = {
+                    "set_note_pitch": "setNotePitch",
+                    "set_note_pitches": "setNotePitches",
+                }
+                command = commands.get(kind) if isinstance(kind, str) else None
+                if command is None or command not in receipt.supported_mutations:
+                    raise BridgeError(
+                        "Plugin does not support this receipted mutation; "
+                        "update the plugin."
+                    )
         if action not in capabilities.commands:
             raise BridgeError(
                 f"MuseScore plugin {capabilities.plugin_version} does not support "
@@ -379,6 +391,13 @@ class MuseScoreBridge(WebSocketBridge):
     async def execute_mutation_once(self, request: ReceiptExecution) -> MutationReceipt:
         return await self._receipt_request(
             MuseScoreCommand.EXECUTE_MUTATION_ONCE, request
+        )
+
+    async def set_note_pitches(self, request: PitchBatchRequest) -> PitchBatchEdit:
+        return await self._run(
+            PitchBatchEdit,
+            MuseScoreCommand.SET_NOTE_PITCHES,
+            cast("dict[str, Any]", _camel_case_keys(request.model_dump())),
         )
 
     async def read_mutation_receipt(self, request: ReceiptIdentity) -> MutationReceipt:

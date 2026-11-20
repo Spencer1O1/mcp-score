@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from mcp_score.bridge.duration_edit import DurationEdit, ExpectedDurationEvent
     from mcp_score.bridge.passage import Passage
     from mcp_score.bridge.pitch import ExpectedChord, PitchEdit
+    from mcp_score.bridge.pitch_batch import PitchBatchEdit, PitchBatchRequest
     from mcp_score.bridge.receipts import (
         MutationReceipt,
         ReceiptExecution,
@@ -153,6 +154,12 @@ class ScoreBridge(ABC):
         """Execute only supported, explicitly identified mutations."""
         raise BridgeError(
             f"{self.application_name} does not support mutation receipts."
+        )
+
+    async def set_note_pitches(self, request: PitchBatchRequest) -> PitchBatchEdit:
+        """Preflight distinct chord targets and edit them in one native command."""
+        raise BridgeError(
+            f"{self.application_name} cannot execute guarded pitch batches."
         )
 
     async def read_mutation_receipt(self, request: ReceiptIdentity) -> MutationReceipt:

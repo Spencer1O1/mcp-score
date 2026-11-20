@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from mcp_score.bridge.receipts import (
-    GuardedPitchMutation,
     MutationReceipt,
     OperationId,
     PluginSession,
     ReceiptExecution,
     ReceiptIdentity,
+    ReceiptMutation,
 )
 from mcp_score.context import ScoreContext
 from mcp_score.tools import ToolError, require_bridge, score_tool
@@ -28,9 +28,9 @@ async def execute_mutation_once(
     context: ScoreContext,
     operation_id: OperationId,
     expected_plugin_session: PluginSession,
-    mutation: GuardedPitchMutation,
+    mutation: ReceiptMutation,
 ) -> MutationReceipt:
-    """Execute one guarded pitch request with a caller-retained operation ID.
+    """Execute one guarded pitch request or batch with a caller-retained ID.
 
     Create and retain a unique operation_id BEFORE the first call. Obtain the
     plugin session from connect_to_musescore/get_musescore_bridge_info. Repeating
@@ -38,7 +38,8 @@ async def execute_mutation_once(
     changing the payload conflicts. This command is never automatically replayed.
     After a lost response or cancellation, explicitly retry the exact request or
     read its receipt. Never replace the session token automatically after restart.
-    Only set_note_pitch is supported; legacy mutation tools are not protected.
+    Only set_note_pitch and set_note_pitches are supported; legacy mutation
+    tools are not protected. Batch targets must be distinct chords, at most 32.
 
     Receipt completion means an original native reply was retained, including
     errors; it does not mean the edit succeeded. Replies are HISTORICAL, including

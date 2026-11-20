@@ -8,6 +8,7 @@ from pydantic import Field, JsonValue, StrictBool, StrictInt, StrictStr, model_v
 
 # Pydantic evaluates nested input annotations at runtime.
 from mcp_score.bridge.pitch import PitchEditRequest  # noqa: TC001
+from mcp_score.bridge.pitch_batch import PitchBatchRequest  # noqa: TC001
 from mcp_score.bridge.results import Result
 
 __all__ = [
@@ -15,6 +16,8 @@ __all__ = [
     "OperationId",
     "PluginSession",
     "GuardedPitchMutation",
+    "GuardedPitchBatchMutation",
+    "ReceiptMutation",
     "ReceiptExecution",
     "ReceiptIdentity",
     "ReceiptCapabilities",
@@ -42,8 +45,18 @@ class GuardedPitchMutation(Result):
     request: PitchEditRequest
 
 
+class GuardedPitchBatchMutation(Result):
+    kind: Literal["set_note_pitches"]
+    request: PitchBatchRequest
+
+
+ReceiptMutation = Annotated[
+    GuardedPitchMutation | GuardedPitchBatchMutation, Field(discriminator="kind")
+]
+
+
 class ReceiptExecution(ReceiptIdentity):
-    mutation: GuardedPitchMutation
+    mutation: ReceiptMutation
 
 
 class ReceiptCapabilities(Result):
@@ -64,7 +77,7 @@ class MutationReceipt(Result):
     plugin_session: PluginSession
     operation_id: OperationId
     status: Literal["not_found", "pending", "completed", "unknown"]
-    command: Literal["setNotePitch"] | None
+    command: Literal["setNotePitch", "setNotePitches"] | None
     cached: StrictBool
     """Lookup/retrieval response, not proof that an operation completed or applied."""
     historical: Literal[True]
@@ -80,7 +93,7 @@ class MutationReceipt(Result):
                 raise ValueError(
                     "Absent receipt cannot contain an executed command/reply"
                 )
-        elif self.command != "setNotePitch":
+        elif self.command not in {"setNotePitch", "setNotePitches"}:
             raise ValueError("Reserved receipt must identify its command")
         if (self.status == "completed") != (self.original_reply is not None):
             raise ValueError("Only completed receipts contain the original reply")

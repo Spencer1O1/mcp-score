@@ -159,6 +159,17 @@ and undo-stack inspection are not exposed by the supported wrappers; selection
 preservation is checked directly and undo preservation through a disposable
 edit/read/undo round trip.
 
+The guarded-pitch restart phase separately opts into
+`MUSESCORE_PITCH_BATCH_TEST_SETUP=1`. Under the marked owned profile only, it
+installs fixed arm/read commands and a one-shot fault into the plugin copy. The
+fault records primitive pitch/TPC values after the first real native write and
+throws before the second, proving full target restoration and preservation of
+a prior fixture undo entry. No arbitrary code or fault parameters are accepted.
+All unique insertion points and unlinked owned paths are checked before writes.
+Source/package files remain unchanged, the normal handshake lacks these test
+commands, and the next startup restores production files. Cleanup never sends
+an undo after an uncertain, failed or previously attempted undo.
+
 `stop` retains the marked artifacts and logs for inspection. Collect them before
 removing the profile:
 

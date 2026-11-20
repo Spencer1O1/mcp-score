@@ -106,8 +106,8 @@ def split_docstring(text: str) -> tuple[str, dict[str, str], str]:
 def schema_type(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
         return str(schema["$ref"]).rsplit("/", 1)[-1]
-    if "anyOf" in schema:
-        options: list[dict[str, Any]] = schema["anyOf"]
+    if "anyOf" in schema or "oneOf" in schema:
+        options: list[dict[str, Any]] = schema.get("anyOf", schema.get("oneOf", []))
         return " | ".join(schema_type(option) for option in options)
     if "enum" in schema:
         return " | ".join(json.dumps(value) for value in schema["enum"])

@@ -22,7 +22,7 @@ function newState() {
 
 function capabilities(plugin) {
     return {protocolVersion: receiptVersion, pluginSession: plugin.receiptState.sessionId,
-        supportedMutations: ["setNotePitch"], capacity: capacity,
+        supportedMutations: ["setNotePitch", "setNotePitches"], capacity: capacity,
         maxPayloadUnits: maxPayloadUnits, maxReplyUnits: maxReplyUnits,
         maxDepth: maxDepth, maxNodes: maxNodes, retention: "plugin_session_non_evicting"};
 }
@@ -106,7 +106,7 @@ function canonical(value, limit) {
 function result(plugin, operationId, entry, cached) {
     return {result: {pluginSession: plugin.receiptState.sessionId,
         operationId: operationId, status: entry ? entry.status : "not_found",
-        command: entry ? "setNotePitch" : null, cached: cached, historical: true,
+        command: entry ? entry.command : null, cached: cached, historical: true,
         originalReply: entry && entry.replyJson !== null ? JSON.parse(entry.replyJson) : null,
         reason: entry ? entry.reason : null}};
 }
@@ -126,14 +126,17 @@ function executeMutationOnce(plugin, params) {
     var mutation = params.mutation;
     if (!mutation || typeof mutation !== "object" || Array.isArray(mutation)
             || Object.keys(mutation).sort().join(",") !== "kind,request"
-            || mutation.kind !== "set_note_pitch"
             || !mutation.request || typeof mutation.request !== "object"
-            || Array.isArray(mutation.request)
-            || !Object.prototype.hasOwnProperty.call(plugin.commands, "setNotePitch")) {
-        return failure(params, "unsupported_receipted_mutation", "Only an explicit guarded set_note_pitch request is supported");
+            || Array.isArray(mutation.request)) {
+        return failure(params, "unsupported_receipted_mutation", "An explicit supported guarded mutation is required");
+    }
+    var command = mutation.kind === "set_note_pitch" ? "setNotePitch"
+        : (mutation.kind === "set_note_pitches" ? "setNotePitches" : null);
+    if (command === null || !Object.prototype.hasOwnProperty.call(plugin.commands, command)) {
+        return failure(params, "unsupported_receipted_mutation", "Only guarded pitch and distinct-chord pitch batches are supported");
     }
     var payload;
-    try { payload = canonical({command: "setNotePitch", params: mutation.request}, maxPayloadUnits); }
+    try { payload = canonical({command: command, params: mutation.request}, maxPayloadUnits); }
     catch (invalid) { return failure(params, "invalid_receipt_payload", "Payload is not bounded, safe-integer JSON"); }
     var state = plugin.receiptState;
     if (Object.prototype.hasOwnProperty.call(state.entries, params.operationId)) {
@@ -147,11 +150,11 @@ function executeMutationOnce(plugin, params) {
         return failure(params, "receipt_ledger_full", "Receipt ledger is full; existing receipts remain available, new operations cannot execute");
     }
     // Reservation precedes every handler call. Entries are never evicted.
-    var entry = {payload: payload, status: "pending", replyJson: null, reason: null};
+    var entry = {payload: payload, command: command, status: "pending", replyJson: null, reason: null};
     state.entries[params.operationId] = entry;
     state.size++;
     var reply;
-    try { reply = plugin.commands.setNotePitch(plugin, mutation.request); }
+    try { reply = plugin.commands[command](plugin, mutation.request); }
     catch (thrown) {
         entry.status = "unknown";
         entry.reason = reason("handler_threw", thrown);

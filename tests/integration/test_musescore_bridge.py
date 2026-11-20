@@ -179,6 +179,9 @@ class TestMuseScoreBridgeCapabilities:
             assert diagnostics.protocol_version == 1
             assert "getScore" in diagnostics.commands
             assert "readCurrentSelection" in diagnostics.commands
+            assert "setNotePitches" in diagnostics.commands
+            assert "setNotePitches" not in diagnostics.sequence_commands
+            assert "_testArmPitchBatchFault" not in diagnostics.commands
             assert "_testSelectionSetup" not in diagnostics.commands
             assert "appendMeasures" in diagnostics.sequence_commands
             assert "getScore" not in diagnostics.sequence_commands

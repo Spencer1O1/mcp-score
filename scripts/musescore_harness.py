@@ -521,6 +521,68 @@ def _install_selection_fixture(layout: Layout) -> None:
     target.write_text(text)
 
 
+def _install_pitch_batch_fixture(layout: Layout) -> None:
+    """Inject one fixed midbatch fault only into the marked installed test copy."""
+    validate_artifact_boundary(layout)
+    marker = layout.root / PROFILE_MARKER
+    if (
+        not unlinked_log_source(marker, layout.root)
+        or not marker.is_file()
+        or marker.read_text() != PROFILE_MARKER_CONTENT
+    ):
+        raise HarnessError("Pitch batch fixture requires a marked owned profile")
+    directory = layout.plugins_dir / PLUGIN_DIRECTORY_NAME
+    qml = directory / PLUGIN_QML_NAME
+    batch = directory / "pitch-batch.js"
+    driver = directory / "pitch-batch-fixture.js"
+    if not all(unlinked_log_source(path, layout.root) for path in (qml, batch, driver)):
+        raise HarnessError("Refusing a linked pitch batch fixture destination")
+    qml_text, batch_text = qml.read_text(), batch.read_text()
+    replacements = {
+        'import "pitch-batch.js" as PitchBatch': (
+            'import "pitch-batch.js" as PitchBatch\n'
+            'import "pitch-batch-fixture.js" as PitchBatchFixture'
+        ),
+        "property var receiptState: null": (
+            "property var receiptState: null\n    property var pitchBatchFault: null"
+        ),
+        '"setNotePitches":       PitchBatch.setNotePitches,': (
+            '"setNotePitches":       PitchBatch.setNotePitches,\n'
+            '        "_testArmPitchBatchFault": PitchBatchFixture.arm,\n'
+            '        "_testReadPitchBatchFault": PitchBatchFixture.read,'
+        ),
+    }
+    sentinel = "Pitch.applyPitchPlan(plans[index]);"
+    if batch_text.count(sentinel) != 1 or any(
+        qml_text.count(value) != 1 for value in replacements
+    ):
+        raise HarnessError("Pitch batch fixture sentinel is missing or ambiguous")
+    # All paths and insertion points are checked before any fault-file writes.
+    source = REPOSITORY_ROOT / "tests/integration/plugin/pitch-batch-fixture.js"
+    driver_text = source.read_text()
+    for value, replacement in replacements.items():
+        qml_text = qml_text.replace(value, replacement)
+    injection = (
+        """if (index === 1 && plans[0].changed && plugin.pitchBatchFault
+                        && plugin.pitchBatchFault.armed) {
+                    var nativeFirst = plans[0].selected;
+                    plugin.pitchBatchFault = {armed: false, observed: {
+                        pitch: nativeFirst.pitch, tpc: nativeFirst.tpc1,
+                        writtenTpc: nativeFirst.tpc2,
+                        requestedPitch: plans[0].params.pitch,
+                        originalPitch: plans[0].before.notes[
+                            plans[0].params.noteIndex].pitch}};
+                    throw Error("CI fixed fault after first native pitch application");
+                }
+                """
+        + sentinel
+    )
+    batch_text = batch_text.replace(sentinel, injection)
+    driver.write_text(driver_text)
+    batch.write_text(batch_text)
+    qml.write_text(qml_text)
+
+
 def child_environment(settings: Settings) -> dict[str, str]:
     """Isolate child-process application paths without changing HOME."""
     root = settings.layout.root
@@ -1212,6 +1274,8 @@ def start(settings: Settings, score: Path) -> None:
             seed_configuration(settings.layout)
         if os.environ.get("MUSESCORE_SELECTION_TEST_SETUP") == "1":
             _install_selection_fixture(settings.layout)
+        if os.environ.get("MUSESCORE_PITCH_BATCH_TEST_SETUP") == "1":
+            _install_pitch_batch_fixture(settings.layout)
         try:
             if settings.system == "Linux":
                 start_xvfb(settings)
