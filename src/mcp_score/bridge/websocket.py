@@ -115,16 +115,16 @@ class WebSocketTransport:
                 raise TransportError(f"send failed: {exception}") from None
 
     async def request(self, payload: dict[str, Any]) -> CommandResult:
-        """Own the complete request/reply pair and discard cancelled streams.
+        """Own the request/reply pair and discard failed or cancelled streams.
 
-        Cancellation propagates; it never establishes whether a mutation was
-        applied. Discarding the connection prevents a late reply from being
-        mistaken for the next request's response.
+        Failure and cancellation preserve their original exceptions; neither
+        establishes whether a mutation was applied. Discarding the connection
+        prevents a late reply from becoming the next request's response.
         """
         async with self._io_lock:
             try:
                 return await self._request(payload)
-            except asyncio.CancelledError:
+            except asyncio.CancelledError, TransportError:
                 await self._discard_connection()
                 raise
 

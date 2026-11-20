@@ -112,14 +112,17 @@ offline rendering tools have no score context and do not acquire this scope.
 
 Lock order is registry workflow, bridge operation, then transport I/O. Registry
 activation/deactivation and bridge connect/disconnect/exchange share their
-respective operation scopes. Those scopes allow nesting only within the owning
+respective operation scopes. Connection tools acquire ownership of the target
+bridge before assigning its endpoint, even when that bridge is not active. Those scopes allow nesting only within the owning
 asyncio task, so a connect inside a tool or reconnect inside an exchange does
 not deadlock. Child tasks do not inherit ownership; a caller must not await a
 child operation while retaining the scope that child needs.
 
-The transport serializes each complete send/receive pair. Cancelling an
+The transport serializes each complete send/receive pair. A failed or cancelled
 in-flight request discards its connection before releasing ownership, so a late
-response cannot become the next request's result. Handshake and disconnect
+response cannot become the next request's result. Queued transport callers fail
+without sending after that discard; they must explicitly open a fresh connection.
+Original transport failure metadata is preserved. Handshake and disconnect
 cancellation also close their transports, and cancelled lock waiters do not
 acquire ownership. Cancellation propagates as cancellation; it does not prove
 that a mutation failed, confirm rollback, or make a manual retry safe. A tool

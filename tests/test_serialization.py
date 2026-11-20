@@ -9,11 +9,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from mcp_score.bridge import BridgeRegistry
 from mcp_score.bridge.musescore import MuseScoreBridge
 from mcp_score.bridge.results import CursorPosition, Duration, NoteAdded
-from mcp_score.bridge.websocket import WebSocketTransport
+from mcp_score.bridge.websocket import TransportError, WebSocketTransport
+from mcp_score.tools.connection import connect_to_musescore
 from mcp_score.tools.manipulation import add_live_note
 from tests.fakes import (
     MUSESCORE_HANDSHAKE,
@@ -376,3 +378,83 @@ async def test_direct_lifecycle_change_waits_between_steps_of_mcp_workflow() -> 
                 await asyncio.gather(edit, disconnect, return_exceptions=True)
         connection.close.assert_awaited_once()
         assert registry.connected() is None
+
+
+@pytest.mark.anyio()
+@pytest.mark.parametrize("other_active", [False, True])
+async def test_connect_tool_waits_before_reconfiguring_an_owned_inactive_bridge(
+    other_active: bool,
+) -> None:
+    async with asyncio.timeout(5):
+        bridge = MuseScoreBridge(host="original-host", port=8765)
+        registry = BridgeRegistry(musescore=bridge)
+        if other_active:
+            registry.active = FakeBridge("Other application")
+        connection = fake_connection(MUSESCORE_HANDSHAKE)
+        connect = AsyncMock(return_value=connection)
+        with patch(WEBSOCKETS_CONNECT, connect):
+            try:
+                async with bridge.operation():
+                    switch = asyncio.create_task(
+                        connect_to_musescore(
+                            score_context(registry), host="replacement-host", port=9000
+                        )
+                    )
+                    await asyncio.sleep(0)
+                    assert not switch.done()
+                    assert bridge.host == "original-host"
+                    assert bridge.port == 8765
+                    connect.assert_not_awaited()
+                result = await switch
+                assert result.uri == "ws://replacement-host:9000"
+                assert registry.connected() is bridge
+                connect.assert_awaited_once_with("ws://replacement-host:9000")
+            finally:
+                await asyncio.gather(switch, return_exceptions=True)
+                await bridge.disconnect()
+
+
+@pytest.mark.anyio()
+async def test_timed_out_transport_discards_late_reply_before_queued_request() -> None:
+    async with asyncio.timeout(5):
+        received: list[int] = []
+        first_received = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handle(connection: ServerConnection) -> None:
+            try:
+                async for message in connection:
+                    request = json.loads(message)
+                    received.append(request["number"])
+                    if request["number"] == 1:
+                        first_received.set()
+                        await release.wait()
+                    await connection.send(json.dumps({"result": request["number"]}))
+            except ConnectionClosed:
+                pass  # The first caller timed out before this late reply was sent.
+
+        async with websockets.serve(handle, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            transport = WebSocketTransport(f"ws://127.0.0.1:{port}", 0.1)
+            await transport.open()
+            first = asyncio.create_task(transport.request({"number": 1}))
+            await first_received.wait()
+            second = asyncio.create_task(transport.request({"number": 2}))
+            try:
+                with pytest.raises(TransportError) as first_failure:
+                    await first
+                assert first_failure.value.may_have_been_sent is True
+                with pytest.raises(TransportError) as queued_failure:
+                    await second
+                assert queued_failure.value.may_have_been_sent is False
+                assert not transport.is_open
+                assert received == [1]
+                release.set()
+                transport.receive_timeout = 1
+                await transport.open()
+                assert await transport.request({"number": 2}) == {"result": 2}
+                assert received == [1, 2]
+            finally:
+                release.set()
+                await asyncio.gather(first, second, return_exceptions=True)
+                await transport.close()
