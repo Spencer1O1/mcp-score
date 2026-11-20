@@ -109,6 +109,7 @@ class TestMuseScoreBridgeCapabilities:
     @pytest.mark.anyio()
     async def test_negotiated_commands_match_live_plugin_dispatch(self) -> None:
         async with _connected_bridge() as bridge:
+            assert await bridge.connect()
             diagnostics = bridge.diagnostics()
             assert diagnostics.plugin_version
             assert diagnostics.protocol_version == 1
