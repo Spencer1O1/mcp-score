@@ -57,10 +57,19 @@ function setup(plugin, params) {
                 measure = measure.nextMeasure;
             }
             var segment = measure ? measure.firstSegment : null;
-            while (segment && segment.tick !== address.tick) segment = segment.nextInMeasure;
-            var chord = segment ? segment.elementAt(address.track) : null;
-            if (!chord || chord.type !== plugin.Element.CHORD
-                    || address.noteIndex >= chord.notes.length) return {error: "Test note not found"};
+            var chord = null;
+            // Clefs, signatures and chord/rest segments can share an onset.
+            while (segment && segment.tick <= address.tick) {
+                if (segment.tick === address.tick) {
+                    var candidate = segment.elementAt(address.track);
+                    if (candidate && candidate.type === plugin.Element.CHORD) {
+                        if (chord) return {error: "Ambiguous test chord onset"};
+                        chord = candidate;
+                    }
+                }
+                segment = segment.nextInMeasure;
+            }
+            if (!chord || address.noteIndex >= chord.notes.length) return {error: "Test note not found"};
             notes.push(chord.notes[address.noteIndex]);
         }
         if (!selection.clear()) return {error: "Native clear rejected"};
