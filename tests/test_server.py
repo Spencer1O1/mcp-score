@@ -37,6 +37,7 @@ EXPECTED_TOOLS: frozenset[str] = frozenset(
         # analysis
         "read_passage",
         "get_measure_content",
+        "get_event_at_position",
         "get_selection_properties",
         # manipulation
         "add_live_note",

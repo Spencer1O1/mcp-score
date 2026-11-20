@@ -100,6 +100,27 @@ An old plugin that lacks `readPassage` returns an error; the Python server does
 not fall back to returning only the first note. Reinstall the plugin when
 updating the server.
 
+### Looking up an exact event
+
+`get_event_at_position` reads one rhythmic onset using explicit ordinal measure,
+staff, voice, and whole-note fraction coordinates. For example, an offset of
+`2/4` matches the same onset as `1/2` (beat three in a 4/4 measure). The numerator
+must be a nonnegative integer and the denominator a positive integer; floats,
+numeric strings, and booleans are rejected. Positions inside a sustained note
+or rest do not match its onset. An absent or ambiguous onset produces an error.
+
+Omit `note_index` to return the whole chord or rest. Supply a zero-based index
+to select a tone from the returned chord's `notes` list while retaining the
+whole event in the response. A rest has no tone indices. Indices describe the
+ordering in that response and are not durable note identifiers.
+
+The Python tool reuses one scoped live passage read and returns its unsupported
+notation list. It does not move selection or the bridge cursor. The returned
+address has `single_read` scope: it establishes no score identity, revision,
+or edit precondition. After any score change, read again before interpreting
+the coordinates. The tool does not implement containing-note lookup or grace
+note addressing.
+
 ## Protocol
 
 The plugin accepts JSON messages over WebSocket. Each message must have a `command` field and optionally a `params` field. Responses have either a `result` field (on success) or an `error` field (on failure).
