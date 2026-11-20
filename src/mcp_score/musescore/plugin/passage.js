@@ -70,6 +70,7 @@ function describeEvent(plugin, element, staff, voice, tick, measureTick) {
             notes.push({
                 pitch: note.pitch,
                 tpc: note.tpc1,
+                writtenTpc: note.tpc2,
                 name: concertName(note.pitch, note.tpc1),
                 displayedTpc: note.tpc
             });

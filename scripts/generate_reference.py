@@ -57,7 +57,7 @@ PREAMBLE = "\n".join(
 )
 
 ARGS_HEADING = "Args:"
-RESULT_TYPES_TITLE = "## Result types"
+RESULT_TYPES_TITLE = "## Shared input and result types"
 SCHEMA_TYPE_NAMES: dict[str, str] = {
     "string": "str",
     "integer": "int",
@@ -195,6 +195,7 @@ def render_result(schema: dict[str, Any], shared: dict[str, dict[str, Any]]) -> 
 
 def render_tool(tool: Tool, shared: dict[str, dict[str, Any]]) -> str:
     body, arguments, tail = split_docstring(tool.description or "")
+    shared.update(tool.input_schema.get("$defs", {}))
     parts = [
         f"### {code(tool.name)}",
         body,

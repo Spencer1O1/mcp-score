@@ -21,6 +21,7 @@ import pytest
 
 from mcp_score.bridge import BridgeError
 from mcp_score.bridge.musescore import MuseScoreBridge
+from mcp_score.bridge.pitch import ExpectedChord
 from mcp_score.bridge.results import BarlineSet, Duration, Note
 
 if TYPE_CHECKING:
@@ -358,3 +359,82 @@ class TestMuseScoreBridgeSequences:
         assert response["result"]["count"] == 4
         assert count_after == count_before + 1
         assert count_restored == count_before
+
+
+class TestMuseScoreGuardedPitch:
+    @pytest.mark.anyio()
+    async def test_guarded_pitch_reads_back_and_one_undo_restores_score(self) -> None:
+        async with _connected_bridge() as bridge:
+            before = await bridge.read_passage(1, 1, 0, 0)
+            target = [
+                event for event in before.measures[0].events if event.kind == "chord"
+            ][2]
+            applied = False
+            try:
+                changed = await bridge.set_note_pitch(
+                    1,
+                    0,
+                    0,
+                    target.offset,
+                    0,
+                    67,
+                    15,
+                    ExpectedChord.model_validate(target.model_dump()),
+                )
+                applied = changed.mutation_status == "applied"
+                after = await bridge.read_passage(1, 1, 0, 0)
+                assert changed.before == target
+                assert [
+                    note.name
+                    for event in after.measures[0].events
+                    for note in event.notes
+                ] == ["C4", "D4", "G4", "F4"]
+                assert (
+                    changed.after
+                    == [
+                        event
+                        for event in after.measures[0].events
+                        if event.kind == "chord"
+                    ][2]
+                )
+            finally:
+                if applied:
+                    await bridge.undo()
+            restored = await bridge.read_passage(1, 1, 0, 0)
+        assert restored == before
+
+    @pytest.mark.anyio()
+    async def test_stale_guard_and_noop_do_not_add_undo_steps(self) -> None:
+        async with _connected_bridge() as bridge:
+            before = await bridge.read_passage(1, 1, 0, 0)
+            target = next(
+                event for event in before.measures[0].events if event.kind == "chord"
+            )
+            expected = ExpectedChord.model_validate(target.model_dump())
+            applied = False
+            try:
+                changed = await bridge.set_note_pitch(
+                    1, 0, 0, target.offset, 0, 61, 21, expected
+                )
+                applied = changed.mutation_status == "applied"
+                with pytest.raises(BridgeError) as error:
+                    await bridge.set_note_pitch(
+                        1, 0, 0, target.offset, 0, 62, 16, expected
+                    )
+                assert error.value.details["code"] == "stale_target"
+                noop = await bridge.set_note_pitch(
+                    1,
+                    0,
+                    0,
+                    target.offset,
+                    0,
+                    61,
+                    21,
+                    ExpectedChord.model_validate(changed.after.model_dump()),
+                )
+                assert noop.mutation_status == "unchanged"
+            finally:
+                if applied:
+                    await bridge.undo()
+            restored = await bridge.read_passage(1, 1, 0, 0)
+        assert restored == before

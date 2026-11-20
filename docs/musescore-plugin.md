@@ -121,6 +121,54 @@ or edit precondition. After any score change, read again before interpreting
 the coordinates. The tool does not implement containing-note lookup or grace
 note addressing.
 
+## Guarded pitch edits
+
+`set_live_note_pitch` changes one chord tone at an explicit measure, staff,
+voice, and exact whole-note offset. Supply the complete chord event from a
+fresh `get_event_at_position` or passage read as `expected`, plus that event's
+`note_index`, replacement sounding MIDI `pitch`, and concert `tpc` spelling.
+For example, G4 is MIDI 67 and TPC 15; C#4 is MIDI 61 and TPC 21. The MIDI pitch
+and TPC must agree. Coordinates, indices, pitch/TPC values, and fraction fields
+are strict integers; booleans, numeric strings, and floating-point values are
+rejected instead of converted.
+
+The snapshot must contain all chord tones, including `written_tpc`. Older
+reader replies without that field are insufficient; install the matching plugin
+and read again. The handler compares the current onset, track, rhythm, pitches,
+and spellings against the snapshot before opening an undo command. The check
+and edit run synchronously inside MuseScore, so no separate tool call can slip
+between them. This guards only target contents: it provides no persistent event
+ID, application-wide score identity, or revision token, and cannot detect a
+switch to another score with identical target contents.
+
+The edit writes the selected native note's sounding pitch and concert/written
+TPC properties. It preserves the exact previous written-minus-concert TPC
+interval; a replacement written spelling outside the native range is rejected.
+The operation returns native before/after events, the selected tone's new index,
+and an explicit verification and mutation status. Chord ordering may change
+when a tone crosses a peer; indices are valid only for the supplied snapshot.
+Written octave remains unavailable in these results.
+
+Only ordinary pitched chords are supported. Chords containing ties, grace notes,
+tuplets, duplicate sounding tones, drum or tablature parts, microtonal tuning,
+or unavailable eligibility metadata are rejected before mutation. Edits creating
+a duplicate sounding chord tone are also rejected. Successful changes form one
+undo step; an unchanged pitch and spelling create no step.
+
+Native state is checked before and after committing. Verification failure inside
+an open undo command cancels that command; `rolled_back` is reported only when a
+native re-read matches the original target. A failure detected after commit is
+reported as `applied_unverified` with actual snapshots, without blindly undoing
+an earlier action. Transport failures use the separate unknown-outcome handling
+below. Inspect the returned status before retrying or undoing.
+
+The native property semantics and eligibility checks follow the supported API's
+[Note and DurationElement definitions](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/elements.h)
+and [undoable property setters](https://github.com/musescore/MuseScore/blob/v4.4.4/src/engraving/api/v1/scoreelement.cpp).
+Live integration fixtures exercise ordinary and reordered chords, stale/no-op
+requests, Bb and octave transposition, and unsupported tied, tuplet, and grace
+notes across the supported MuseScore matrix.
+
 ## Protocol
 
 The plugin accepts JSON messages over WebSocket. Each message must have a `command` field and optionally a `params` field. Responses have either a `result` field (on success) or an `error` field (on failure).
@@ -195,6 +243,12 @@ verified mutation results.
 | `getScore`        | none                                         | Score metadata: title, parts, measure count, key/time signatures.                               |
 | `getCursorInfo`   | none                                         | Current cursor position: measure, staff, beat, element info.                                    |
 | `readPassage`     | `{startMeasure, endMeasure, staff?, voice?}` | Read all live events in an inclusive measure range without navigating or selecting.             |
+
+### Guarded mutation
+
+| Command        | Params                                                             | Description                                                                                                                        |
+| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `setNotePitch` | `{measure, staff, voice, offset, noteIndex, pitch, tpc, expected}` | Atomically match a complete chord snapshot and change one native note with read-back verification. Top-level only; never replayed. |
 
 ### Navigation
 
